@@ -1,0 +1,38 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      args:
+        USE_GPU: ${USE_GPU:-false}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/media:/app/media
+      - demucs_cache:/root/.cache
+    environment:
+      - USE_GPU=${USE_GPU:-false}
+    # GPU Configuration
+    # If you have an NVIDIA GPU and want to use it, uncomment the section below
+    # and ensure 'nvidia-container-toolkit' is installed on your host.
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - CHOKIDAR_USEPOLLING=true
+    depends_on:
+      - backend
+
+volumes:
+  demucs_cache:
