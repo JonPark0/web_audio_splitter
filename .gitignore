@@ -10,3 +10,4 @@ dist/
 backend/media/
 *.md
 !README.md
+!README_ko.md
