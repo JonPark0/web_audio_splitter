@@ -32,6 +32,7 @@ function App() {
 
 function UploadScreen({ setStep, setTaskId }) {
   const [file, setFile] = useState(null);
+  const [model, setModel] = useState('htdemucs');
   const [uploading, setUploading] = useState(false);
 
   const handleUpload = async () => {
@@ -40,6 +41,7 @@ function UploadScreen({ setStep, setTaskId }) {
     
     const formData = new FormData();
     formData.append('file', file);
+    formData.append('model', model);
     
     try {
       const res = await axios.post(`${API_BASE}/upload`, formData);
@@ -69,6 +71,27 @@ function UploadScreen({ setStep, setTaskId }) {
           <span>{file ? file.name : "Click to Select File"}</span>
         </label>
       </div>
+      
+      <div style={{ marginTop: '20px', marginBottom: '20px' }}>
+        <label htmlFor="model-select" style={{ marginRight: '10px' }}>Model:</label>
+        <select 
+          id="model-select" 
+          value={model} 
+          onChange={(e) => setModel(e.target.value)}
+          style={{ padding: '5px', borderRadius: '5px' }}
+        >
+          <option value="htdemucs">htdemucs (Default)</option>
+          <option value="htdemucs_ft">htdemucs_ft (Fine-tuned)</option>
+          <option value="htdemucs_6s">htdemucs_6s (6 stems)</option>
+          <option value="hdemucs_mmi">hdemucs_mmi</option>
+          <option value="mdx">mdx</option>
+          <option value="mdx_extra">mdx_extra</option>
+          <option value="mdx_q">mdx_q (Quantized)</option>
+          <option value="mdx_extra_q">mdx_extra_q (Quantized)</option>
+          <option value="SIG">SIG</option>
+        </select>
+      </div>
+
       <button onClick={handleUpload} disabled={!file || uploading}>
         {uploading ? 'Uploading...' : 'Start Separation'}
       </button>
