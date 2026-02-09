@@ -1,4 +1,4 @@
-FROM python:3.9-slim
+FROM rocm/pytorch:latest
 
 WORKDIR /app
 

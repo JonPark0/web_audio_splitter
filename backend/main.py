@@ -2,11 +2,19 @@ import os
 import shutil
 import uuid
 import subprocess
+import torch
 from pathlib import Path
 from typing import List
 from fastapi import FastAPI, UploadFile, File, BackgroundTasks, HTTPException, Form
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+
+# GPU 사용 가능 여부 확인
+if torch.cuda.is_available():
+    print(f"✓ GPU 감지됨: {torch.cuda.get_device_name(0)}")
+    print(f"  메모리: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
+else:
+    print("✗ GPU 사용 불가 - CPU 모드로 실행")
 
 app = FastAPI()
 

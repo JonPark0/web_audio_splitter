@@ -12,16 +12,12 @@ services:
     environment:
       - USE_GPU=${USE_GPU:-false}
       - DEMUCS_SHIFTS=${DEMUCS_SHIFTS:-0}
-    # GPU Configuration
-    # If you have an NVIDIA GPU and want to use it, uncomment the section below
-    # and ensure 'nvidia-container-toolkit' is installed on your host.
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: 1
-    #           capabilities: [gpu]
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    group_add:
+      - video
+      - render
 
   frontend:
     build: ./frontend
