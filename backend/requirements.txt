@@ -1,5 +1,7 @@
 fastapi
 uvicorn
 python-multipart
-demucs
+demucs==4.0.1
 soundfile
+torchcodec
+yt-dlp
