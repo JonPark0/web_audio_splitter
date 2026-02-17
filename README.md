@@ -25,34 +25,22 @@ Create(`cp .env.example .env`) or edit the `.env` file in the root directory:
 USE_GPU=false
 DEMUCS_SHIFTS=0
 ```
-- Set `USE_GPU=true` if you have an NVIDIA GPU and want faster processing (requires NVIDIA Container Toolkit).*
-
-Don't forget to enable GPU configuration section in the `docker-compose.yml`. Change the backend deploy section as below.
-
-```yml
-    environment:
-      - USE_GPU=${USE_GPU:-false}
-      - DEMUCS_SHIFTS=${DEMUCS_SHIFTS:-0}
-    # GPU Configuration
-    # If you have an NVIDIA GPU and want to use it, uncomment the section below
-    # and ensure 'nvidia-container-toolkit' is installed on your host.
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-```
-
-- Change the `DEMUCS_SHIFTS` value to increase separation quality (higher values = better quality but slower processing):
+- `DEMUCS_SHIFTS`: Controls separation quality (higher values = better quality but slower processing):
   - `0`: Default, fastest (recommended for CPU)
   - `1-5`: Higher quality, slower processing (recommended for GPU)
 
 ### 3. Run the Application
-Open your terminal in the project folder and run:
+Open your terminal in the project folder and run the appropriate compose file for your environment:
+
+**CPU only (default):**
 ```bash
-docker-compose up --build
+docker compose -f docker-compose.cpu.yml up --build
+```
+
+**GPU (NVIDIA):**
+Requires [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) installed on your host. Set `USE_GPU=true` in your `.env` file.
+```bash
+docker compose -f docker-compose.gpu.yml up --build
 ```
 
 ### 4. Access the UI
@@ -101,7 +89,8 @@ web_audio_splitter/
 │   ├── package.json         # Node.js dependencies
 │   ├── vite.config.js       # Vite configuration
 │   └── Dockerfile           # Frontend container configuration
-├── docker-compose.yml       # Multi-container orchestration
+├── docker-compose.cpu.yml   # Docker Compose for CPU environment
+├── docker-compose.gpu.yml   # Docker Compose for GPU environment (NVIDIA)
 ├── .env.example             # Environment variables template
 └── README.md                # This file
 ```
@@ -118,8 +107,7 @@ The `DEMUCS_SHIFTS` parameter controls the number of random shifts used during s
 To enable GPU acceleration:
 1. Install [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
 2. Set `USE_GPU=true` in [.env](.env)
-3. Uncomment the `deploy` section in [docker-compose.yml](docker-compose.yml:18-24)
-4. Rebuild the containers: `docker-compose up --build`
+3. Run with the GPU compose file: `docker compose -f docker-compose.gpu.yml up --build`
 
 ### Supported Audio Formats
 - MP3, WAV, FLAC, OGG, M4A, WMA
@@ -134,7 +122,7 @@ To enable GPU acceleration:
 - Solution: Start Docker Desktop or Docker service on your system
 
 **Issue: "Port 3000 or 8000 already in use"**
-- Solution: Stop other applications using these ports or modify ports in [docker-compose.yml](docker-compose.yml)
+- Solution: Stop other applications using these ports or modify ports in your docker-compose file
 - Change `"3000:3000"` to `"3001:3000"` for frontend
 - Change `"8000:8000"` to `"8001:8000"` for backend
 

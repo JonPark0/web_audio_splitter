@@ -25,34 +25,22 @@ Meta Demucs AI 모델을 사용하여 오디오 파일을 개별 트랙(보컬, 
 USE_GPU=false
 DEMUCS_SHIFTS=0
 ```
-- NVIDIA GPU를 사용하여 더 빠른 처리를 원하면 `USE_GPU=true`로 설정하세요 (NVIDIA Container Toolkit 필요).*
-
-`docker-compose.yml`에서 GPU 설정 섹션을 활성화하는 것을 잊지 마세요. 백엔드 deploy 섹션을 아래와 같이 변경하세요.
-
-```yml
-    environment:
-      - USE_GPU=${USE_GPU:-false}
-      - DEMUCS_SHIFTS=${DEMUCS_SHIFTS:-0}
-    # GPU 설정
-    # NVIDIA GPU를 사용하려면 아래 섹션의 주석을 해제하고
-    # 호스트에 'nvidia-container-toolkit'이 설치되어 있는지 확인하세요.
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-```
-
-- 분리 품질을 높이려면 `DEMUCS_SHIFTS` 값을 변경하세요 (값이 클수록 품질은 좋지만 처리 속도가 느려집니다):
+- `DEMUCS_SHIFTS`: 분리 품질을 제어합니다 (값이 클수록 품질은 좋지만 처리 속도가 느려집니다):
   - `0`: 기본값, 가장 빠름 (CPU 권장)
   - `1-5`: 높은 품질, 느린 처리 (GPU 권장)
 
 ### 3. 애플리케이션 실행
-프로젝트 폴더에서 터미널을 열고 실행하세요:
+프로젝트 폴더에서 터미널을 열고 환경에 맞는 compose 파일을 실행하세요:
+
+**CPU 전용 (기본):**
 ```bash
-docker-compose up --build
+docker compose -f docker-compose.cpu.yml up --build
+```
+
+**GPU (NVIDIA):**
+호스트에 [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) 설치가 필요합니다. `.env` 파일에서 `USE_GPU=true`로 설정하세요.
+```bash
+docker compose -f docker-compose.gpu.yml up --build
 ```
 
 ### 4. UI 접속
@@ -101,7 +89,8 @@ web_audio_splitter/
 │   ├── package.json         # Node.js 의존성
 │   ├── vite.config.js       # Vite 설정
 │   └── Dockerfile           # 프론트엔드 컨테이너 설정
-├── docker-compose.yml       # 멀티 컨테이너 오케스트레이션
+├── docker-compose.cpu.yml   # CPU 환경용 Docker Compose
+├── docker-compose.gpu.yml   # GPU 환경용 Docker Compose (NVIDIA)
 ├── .env.example             # 환경 변수 템플릿
 └── README.md                # 영문 README
 ```
@@ -118,8 +107,7 @@ web_audio_splitter/
 GPU 가속을 활성화하려면:
 1. [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) 설치
 2. [.env](.env) 파일에서 `USE_GPU=true`로 설정
-3. [docker-compose.yml](docker-compose.yml:18-24)에서 `deploy` 섹션 주석 해제
-4. 컨테이너 재빌드: `docker-compose up --build`
+3. GPU compose 파일로 실행: `docker compose -f docker-compose.gpu.yml up --build`
 
 ### 지원 오디오 포맷
 - MP3, WAV, FLAC, OGG, M4A, WMA
@@ -134,7 +122,7 @@ GPU 가속을 활성화하려면:
 - 해결방법: 시스템에서 Docker Desktop 또는 Docker 서비스를 시작하세요
 
 **문제: "Port 3000 or 8000 already in use"**
-- 해결방법: 해당 포트를 사용 중인 다른 애플리케이션을 중지하거나 [docker-compose.yml](docker-compose.yml)에서 포트를 수정하세요
+- 해결방법: 해당 포트를 사용 중인 다른 애플리케이션을 중지하거나 docker-compose 파일에서 포트를 수정하세요
 - 프론트엔드: `"3000:3000"`을 `"3001:3000"`으로 변경
 - 백엔드: `"8000:8000"`을 `"8001:8000"`으로 변경
 
