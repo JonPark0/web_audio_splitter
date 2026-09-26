@@ -1,9 +1,13 @@
-import React, { useState } from 'react';
+import React, { Suspense, lazy, useEffect, useState } from 'react';
 import UploadScreen from './components/UploadScreen';
 import YouTubeConfirmScreen from './components/YouTubeConfirmScreen';
 import ProcessingScreen from './components/ProcessingScreen';
-import ResultScreen from './components/ResultScreen';
 import TextButton from './components/TextButton';
+
+// The result screen pulls in the mixer + wavesurfer.js, which the upload flow
+// never needs, so it ships as its own chunk (prefetched while processing).
+const loadResultScreen = () => import('./components/ResultScreen');
+const ResultScreen = lazy(loadResultScreen);
 
 const STEPS = [
   { key: 'upload', label: 'Upload' },
@@ -20,6 +24,12 @@ function App() {
   const [ytMeta, setYtMeta] = useState(null);
   const [result, setResult] = useState(null);
   const [recoveryState, setRecoveryState] = useState({ recover: false, recoveryModel: 'apollo' });
+
+  // Processing takes a while, so fetch the result chunk in the background
+  // then; by the time it's needed it's cached and Suspense never shows.
+  useEffect(() => {
+    if (step === 'processing') loadResultScreen().catch(() => {});
+  }, [step]);
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -62,7 +72,11 @@ function App() {
               setResult={setResult}
             />
           )}
-          {step === 'result' && <ResultScreen taskId={taskId} result={result} setStep={setStep} />}
+          {step === 'result' && (
+            <Suspense fallback={null}>
+              <ResultScreen taskId={taskId} result={result} setStep={setStep} />
+            </Suspense>
+          )}
         </div>
       </main>
 

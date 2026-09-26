@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { memo, useEffect, useRef, useState } from 'react';
 import WaveSurfer from 'wavesurfer.js';
 import { FiDownload, FiVolume2, FiVolumeX } from 'react-icons/fi';
 import { trackUrl } from '../api';
@@ -10,7 +10,9 @@ import TextButton from './TextButton';
 const WAVE_COLOR = '#b4b4b0';
 const PROGRESS_COLOR = '#141414';
 
-export default function TrackRow({
+// Memoized so dragging one row's volume slider (Mixer state change) doesn't
+// re-render every other row; Mixer keeps the callback props stable.
+export default memo(function TrackRow({
   taskId,
   trackName,
   hasRecovered,
@@ -53,7 +55,8 @@ export default function TrackRow({
       interact: true,
     });
 
-    ws.load(trackUrl(taskId, trackName, 'original'));
+    // Rejects (and emits 'error', logged below) if destroyed mid-load.
+    ws.load(trackUrl(taskId, trackName, 'original')).catch(() => {});
 
     ws.on('ready', () => {
       wsRef.current = ws;
@@ -98,13 +101,15 @@ export default function TrackRow({
     const duration = ws.getDuration();
     const progress = duration ? ws.getCurrentTime() / duration : 0;
 
-    const handleReady = () => {
+    // Unsubscribed on cleanup too: a rapid re-toggle aborts this load before
+    // 'ready', and a leftover listener would seek to a stale position later.
+    const unsubscribe = ws.once('ready', () => {
       if (progress > 0) ws.seekTo(progress);
       if (wasPlaying) ws.play();
-      ws.un('ready', handleReady);
-    };
-    ws.on('ready', handleReady);
-    ws.load(trackUrl(taskId, trackName, variant));
+    });
+    // Rejects with AbortError when superseded; the 'error' listener logs it.
+    ws.load(trackUrl(taskId, trackName, variant)).catch(() => {});
+    return unsubscribe;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [variant]);
 
@@ -178,4 +183,4 @@ export default function TrackRow({
       <SpectrogramView taskId={taskId} trackName={trackName} hasRecovered={hasRecovered} />
     </div>
   );
-}
+});

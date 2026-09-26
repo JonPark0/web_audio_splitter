@@ -10,19 +10,28 @@ export default function YouTubeConfirmScreen({ taskId, ytMeta, setStep }) {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    const interval = setInterval(async () => {
+    // Self-scheduling poll (see ProcessingScreen): no overlapping requests.
+    let cancelled = false;
+    let timer;
+
+    const poll = async () => {
       try {
         const res = await getStatus(taskId);
+        if (cancelled) return;
         const status = res.data.status;
         setDownloadStatus(status);
-        if (status === 'downloaded' || status === 'download_failed') {
-          clearInterval(interval);
-        }
+        if (status === 'downloaded' || status === 'download_failed') return;
       } catch (e) {
         console.error(e);
       }
-    }, 1500);
-    return () => clearInterval(interval);
+      if (!cancelled) timer = setTimeout(poll, 1500);
+    };
+    timer = setTimeout(poll, 1500);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [taskId]);
 
   const handleConfirm = async () => {

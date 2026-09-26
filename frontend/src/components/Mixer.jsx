@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { FiPlay, FiPause } from 'react-icons/fi';
 import TrackRow from './TrackRow';
 import TextButton from './TextButton';
@@ -27,11 +27,17 @@ export default function Mixer({ taskId, tracks, recoveredTracks }) {
     Object.values(surfers.current).forEach((ws) => (playing ? ws.play() : ws.pause()));
   };
 
-  const handleSeek = (progress) => {
+  // Stable callbacks (functional updates / ref reads only) so the memoized
+  // TrackRows skip re-rendering when another row's state changes.
+  const handleSeek = useCallback((progress) => {
     Object.values(surfers.current).forEach((ws) => {
       if (ws.getDuration()) ws.seekTo(progress);
     });
-  };
+  }, []);
+  const handleVolumeChange = useCallback((t, v) => setVolumes((s) => ({ ...s, [t]: v })), []);
+  const handleToggleMute = useCallback((t) => setMuted((s) => ({ ...s, [t]: !s[t] })), []);
+  const handleToggleSolo = useCallback((t) => setSoloed((s) => ({ ...s, [t]: !s[t] })), []);
+  const handleReady = useCallback(() => setReadyCount((c) => c + 1), []);
 
   return (
     <div className="flex w-full flex-col gap-6">
@@ -64,11 +70,11 @@ export default function Mixer({ taskId, tracks, recoveredTracks }) {
             muted={!!muted[track]}
             soloed={!!soloed[track]}
             anySoloed={anySoloed}
-            onVolumeChange={(t, v) => setVolumes((s) => ({ ...s, [t]: v }))}
-            onToggleMute={(t) => setMuted((s) => ({ ...s, [t]: !s[t] }))}
-            onToggleSolo={(t) => setSoloed((s) => ({ ...s, [t]: !s[t] }))}
+            onVolumeChange={handleVolumeChange}
+            onToggleMute={handleToggleMute}
+            onToggleSolo={handleToggleSolo}
             surfers={surfers}
-            onReady={() => setReadyCount((c) => c + 1)}
+            onReady={handleReady}
             onSeek={handleSeek}
           />
         ))}
