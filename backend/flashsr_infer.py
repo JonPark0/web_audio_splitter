@@ -23,25 +23,23 @@ for real (multi-minute) stems rather than a single 5.12s clip:
     after inference, before overlap-add.
   - Long audio is processed in overlapping WINDOW_SAMPLES-sized chunks with
     a linear crossfade, mirroring apollo_infer.py's approach.
+  - All of a job's stems are restored in one process, loading the model
+    once (see infer_cli.py).
   - Note also the input has NO batch dimension ([channels, time], not
     [1, channels, time] like Apollo) — confirmed from the real example, not
     guessed.
 
-NOTE (integration risk): the exact `FlashSR(...)` constructor signature and
-padding convention are inferred from a community example (the official
-repo's own example wasn't fully fetchable), not verified by actually
-running this. Expect this file to need adjustment against the real vendored
-module the first time it's actually built and run — apollo_infer.py needed
-exactly this kind of correction after its first real build, and there's no
-reason to assume this one is different until it's been through the same
-real-build-and-fix cycle.
+NOTE: the `FlashSR(...)` constructor signature and padding convention were
+inferred from a community example, then verified by an end-to-end run of
+the built image (BS-Roformer + FlashSR on GPU, all stems restored).
 """
-import argparse
 import sys
 
 import numpy as np
 import soundfile as sf
 import torch
+
+import infer_cli
 
 # FlashSR is cloned to /app/flashsr at Docker build time (see
 # backend/Dockerfile) and put on PYTHONPATH there; this sys.path entry
@@ -122,23 +120,21 @@ def restore(model, audio: np.ndarray, sr: int, device: str) -> np.ndarray:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Restore a single audio stem with FlashSR.")
-    parser.add_argument("--in_wav", required=True)
-    parser.add_argument("--out_wav", required=True)
-    parser.add_argument("--device", default="cpu")
+    parser = infer_cli.build_parser("Restore audio stems with FlashSR (model loaded once for all stems).")
     parser.add_argument("--repo_id", default=DEFAULT_REPO_ID)
     args = parser.parse_args()
 
     device = args.device if (args.device == "cpu" or torch.cuda.is_available()) else "cpu"
-
-    audio, sr = sf.read(args.in_wav, always_2d=False, dtype="float32")
-    audio = audio.T if audio.ndim == 2 else audio  # soundfile gives (T, C); model wants (C, T)
-
     model = build_model(args.repo_id, device)
-    restored = restore(model, audio, sr, device)
 
-    out = restored.T if restored.ndim == 2 else restored
-    sf.write(args.out_wav, out, SAMPLE_RATE)
+    def restore_one(in_wav: str, out_wav: str) -> None:
+        audio, sr = sf.read(in_wav, always_2d=False, dtype="float32")
+        audio = audio.T if audio.ndim == 2 else audio  # soundfile gives (T, C); model wants (C, T)
+        restored = restore(model, audio, sr, device)
+        out = restored.T if restored.ndim == 2 else restored
+        sf.write(out_wav, out, SAMPLE_RATE)
+
+    infer_cli.run_batch(args.in_wav, args.out_wav, restore_one)
 
 
 if __name__ == "__main__":

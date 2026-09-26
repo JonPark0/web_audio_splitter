@@ -27,16 +27,19 @@ Also, unlike the demo:
     CPU, which is this project's default.
   - Long stems (minutes, not the demo's ~1s clip) are processed in
     overlapping chunks with a linear crossfade to bound memory use.
+  - All of a job's stems are restored in one process, loading the model
+    once (see infer_cli.py).
 
 The look2hear/ package is vendored inside the Apollo repo itself (confirmed
 via the repo's file tree) — no separate `look2hear` package to install.
 """
-import argparse
 import sys
 
 import numpy as np
 import soundfile as sf
 import torch
+
+import infer_cli
 
 # Apollo (and the look2hear package vendored inside it) is cloned to
 # /app/apollo at Docker build time (see backend/Dockerfile) and put on
@@ -121,24 +124,22 @@ def restore(model: torch.nn.Module, audio: np.ndarray, sr: int, device: str) -> 
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Restore a single audio stem with Apollo.")
-    parser.add_argument("--in_wav", required=True)
-    parser.add_argument("--out_wav", required=True)
-    parser.add_argument("--device", default="cpu")
+    parser = infer_cli.build_parser("Restore audio stems with Apollo (model loaded once for all stems).")
     parser.add_argument("--repo_id", default=DEFAULT_REPO_ID)
     parser.add_argument("--ckpt_filename", default=DEFAULT_CKPT_FILENAME)
     args = parser.parse_args()
 
     device = args.device if (args.device == "cpu" or torch.cuda.is_available()) else "cpu"
-
-    audio, sr = sf.read(args.in_wav, always_2d=False, dtype="float32")
-    audio = audio.T if audio.ndim == 2 else audio  # soundfile gives (T, C); model wants (C, T)
-
     model = build_model(args.repo_id, args.ckpt_filename, device)
-    restored = restore(model, audio, sr, device)
 
-    out = restored.T if restored.ndim == 2 else restored  # back to (T, C) for soundfile
-    sf.write(args.out_wav, out, SAMPLE_RATE)
+    def restore_one(in_wav: str, out_wav: str) -> None:
+        audio, sr = sf.read(in_wav, always_2d=False, dtype="float32")
+        audio = audio.T if audio.ndim == 2 else audio  # soundfile gives (T, C); model wants (C, T)
+        restored = restore(model, audio, sr, device)
+        out = restored.T if restored.ndim == 2 else restored  # back to (T, C) for soundfile
+        sf.write(out_wav, out, SAMPLE_RATE)
+
+    infer_cli.run_batch(args.in_wav, args.out_wav, restore_one)
 
 
 if __name__ == "__main__":

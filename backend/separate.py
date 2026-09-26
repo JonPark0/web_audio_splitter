@@ -18,6 +18,12 @@ DEMUCS_MODELS = {
     "mdx", "mdx_extra", "mdx_q", "mdx_extra_q", "SIG",
 }
 BS_ROFORMER_MODEL = "bs_roformer"
+# Stems that are a mix of the other stems rather than a separated source —
+# BS-Roformer emits "instrumental.wav" alongside its six stems. They're
+# still returned as tracks, but the recovery stage skips them: restoring a
+# sum of already-restored sources is redundant work (1 of 7 BS-Roformer
+# stems).
+DERIVED_STEMS = {"instrumental"}
 
 
 class SeparationError(RuntimeError):

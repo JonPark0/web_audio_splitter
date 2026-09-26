@@ -9,7 +9,7 @@ A web application to separate audio files into individual tracks (Vocals, Drums,
 - **AI Powered Separation:** Uses Meta's `htdemucs` model (and several alternatives, including BS-Roformer) for high-quality separation.
 - **Split & Recover:** Opt-in per job — after separation, each stem can be run through a restoration model:
   - **Apollo** — band-sequence restoration purpose-built for lossy/compressed music. Fast enough for CPU.
-  - **AudioSR** — general any→48kHz super-resolution. More powerful, diffusion-based, GPU recommended, but slow (~70-90s/stem on a 12s clip at default settings).
+  - **AudioSR** — general any→48kHz super-resolution. More powerful, diffusion-based, GPU recommended, but slow (~15-35s/stem on a 15s clip plus ~30s model load per job, measured on an RTX 4070 SUPER at default settings).
   - **FlashSR** — single-step diffusion-distilled, much faster than AudioSR. Unproven on music specifically and has no stated license — offered as an option, not a default.
   - Original stems are always kept, so you can A/B compare original vs. recovered per track.
 - **Advanced Mixer:**
@@ -77,13 +77,13 @@ There is no single production-ready model that both separates *and* restores aud
 | Model | Approach | Speed | Best for |
 |-------|----------|-------|----------|
 | **Apollo** (default) | Band-sequence modeling ([JusperLee/Apollo](https://github.com/JusperLee/Apollo)) | Fast, CPU-tolerable | Lossy/compressed sources (MP3, YouTube) — the most common cause of "missing" highs in split stems |
-| **AudioSR** | Diffusion-based any→48kHz super-resolution, 10-50 iterative DDIM steps ([haoheliu/versatile_audio_super_resolution](https://github.com/haoheliu/versatile_audio_super_resolution)) | Slow (~70-90s/stem on a 12s clip at default settings), GPU recommended | General bandwidth extension when a hard sample-rate/frequency ceiling is the issue |
+| **AudioSR** | Diffusion-based any→48kHz super-resolution, 10-50 iterative DDIM steps ([haoheliu/versatile_audio_super_resolution](https://github.com/haoheliu/versatile_audio_super_resolution)) | Slow (~15-35s/stem on a 15s clip plus ~30s model load per job, measured on an RTX 4070 SUPER at default settings), GPU recommended | General bandwidth extension when a hard sample-rate/frequency ceiling is the issue |
 | **FlashSR** | Single-step diffusion-distilled any→48kHz ([jakeoneijk/FlashSR_Inference](https://github.com/jakeoneijk/FlashSR_Inference)) | Fast — one forward pass per window instead of AudioSR's iterative loop | When AudioSR-style bandwidth extension is wanted but AudioSR's speed isn't acceptable |
 
 Recovery is **opt-in per job** and keeps the original stems, so you can always compare.
 
 > **Notes:**
-> - AudioSR's own CLI downmixes its output to mono, even for stereo input stems — a constraint of the upstream tool, not this integration. Apollo and FlashSR preserve the original channel count.
+> - AudioSR downmixes its output to mono, even for stereo input stems — a constraint of the upstream tool, not this integration. Apollo and FlashSR preserve the original channel count.
 > - **FlashSR has no stated license** in its repository. It's offered as an option so you can evaluate it, but verify licensing terms yourself before relying on it beyond experimentation. Its architecture lineage (HierSpeech++) is speech-oriented, so its quality on music specifically hasn't been independently verified here either.
 
 ### Investigated but not included
@@ -124,6 +124,8 @@ web_audio_splitter/
 │   ├── restore.py           # Recovery dispatch (Apollo / AudioSR / FlashSR)
 │   ├── apollo_infer.py      # Standalone Apollo inference wrapper (chunked, CPU/GPU)
 │   ├── flashsr_infer.py     # Standalone FlashSR inference wrapper (chunked, CPU/GPU)
+│   ├── audiosr_infer.py     # Standalone AudioSR inference wrapper
+│   ├── infer_cli.py         # Shared batch/progress plumbing for the wrappers (model loaded once per job)
 │   ├── requirements.txt     # Python dependencies
 │   ├── Dockerfile           # Backend container configuration (vendors Apollo + FlashSR)
 │   └── media/               # Uploaded, separated, recovered audio + cached spectrograms

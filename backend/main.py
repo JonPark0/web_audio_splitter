@@ -9,8 +9,8 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import yt_dlp
 
-from restore import restore_stem, RestoreError, SUPPORTED_MODELS, DEFAULT_MODEL
-from separate import separate_audio, SeparationError
+from restore import restore_stems, RestoreError, SUPPORTED_MODELS, DEFAULT_MODEL
+from separate import separate_audio, SeparationError, DERIVED_STEMS
 
 app = FastAPI()
 
@@ -91,7 +91,7 @@ def process_audio(task_id: str, file_path: Path, model: str, recover: bool = Fal
 
         # --- Recovery stage ---
         demucs_out_dir = OUTPUT_DIR / model / task_id
-        stems = sorted(demucs_out_dir.glob("*.wav"))
+        stems = [p for p in sorted(demucs_out_dir.glob("*.wav")) if p.stem not in DERIVED_STEMS]
 
         if not stems:
             tasks[task_id]["status"] = "completed"
@@ -104,18 +104,19 @@ def process_audio(task_id: str, file_path: Path, model: str, recover: bool = Fal
         set_progress(task_id, "restoring", 0, len(stems))
         tasks[task_id]["status"] = "restoring"
 
-        for i, stem_path in enumerate(stems):
-            set_progress(task_id, "restoring", i, len(stems), current_stem=stem_path.stem)
-            out_path = recovered_dir / stem_path.name
-            try:
-                restore_stem(stem_path, out_path, recovery_model, device)
-            except RestoreError as e:
-                # Keep the original (split-only) stems intact; surface the
-                # restoration failure without discarding the split result.
-                print(f"Recovery failed for {task_id}/{stem_path.name}: {e}")
-                tasks[task_id]["status"] = "failed"
-                tasks[task_id]["error"] = f"Recovery failed on '{stem_path.stem}': {e}"
-                return
+        pairs = [(stem_path, recovered_dir / stem_path.name) for stem_path in stems]
+        try:
+            restore_stems(
+                pairs, recovery_model, device,
+                on_stem_start=lambda i: set_progress(task_id, "restoring", i, len(stems), current_stem=stems[i].stem),
+            )
+        except RestoreError as e:
+            # Keep the original (split-only) stems intact; surface the
+            # restoration failure without discarding the split result.
+            print(f"Recovery failed for {task_id}/{e.stem}: {e}")
+            tasks[task_id]["status"] = "failed"
+            tasks[task_id]["error"] = f"Recovery failed on '{e.stem}': {e}" if e.stem else f"Recovery failed: {e}"
+            return
 
         set_progress(task_id, "restoring", len(stems), len(stems))
         tasks[task_id]["status"] = "completed"

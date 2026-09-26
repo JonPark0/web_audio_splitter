@@ -9,7 +9,7 @@ Meta Demucs AI 모델을 사용하여 오디오 파일을 개별 트랙(보컬, 
 - **AI 기반 분리:** Meta의 `htdemucs` 모델(BS-Roformer를 포함한 여러 대안 모델)을 사용한 고품질 분리
 - **분리 & 복원:** 작업별로 선택 가능 — 분리 후 각 스템을 복원 모델로 추가 처리:
   - **Apollo** — 손실/압축 음악 복원에 특화된 band-sequence 모델. CPU에서도 충분히 빠름
-  - **AudioSR** — 범용 any→48kHz 초고해상도 모델. 더 강력하지만 diffusion 기반으로 느림(기본 설정에서 12초 클립 기준 스템당 약 70-90초)
+  - **AudioSR** — 범용 any→48kHz 초고해상도 모델. 더 강력하지만 diffusion 기반으로 느림(RTX 4070 SUPER, 기본 설정, 15초 클립 기준 스템당 약 15-35초 + 작업당 모델 로딩 약 30초)
   - **FlashSR** — single-step distillation 기반, AudioSR보다 훨씬 빠름. 음악에 대한 검증이 부족하고 라이선스가 명시되어 있지 않아 기본값이 아닌 선택 옵션으로 제공
   - 원본 스템은 항상 보존되므로 트랙별로 원본 vs 복원본을 A/B 비교 가능
 - **고급 믹서:**
@@ -77,13 +77,13 @@ docker compose -f docker-compose.gpu.yml up --build
 | 모델 | 방식 | 속도 | 적합한 경우 |
 |------|------|------|-------------|
 | **Apollo** (기본값) | Band-sequence 모델링 ([JusperLee/Apollo](https://github.com/JusperLee/Apollo)) | 빠름, CPU에서도 가능 | 손실/압축 소스(MP3, YouTube) — 분리된 스템에서 고음이 "사라진" 것처럼 들리는 가장 흔한 원인 |
-| **AudioSR** | Diffusion 기반 any→48kHz 초고해상도, 10-50회 반복 DDIM 스텝 ([haoheliu/versatile_audio_super_resolution](https://github.com/haoheliu/versatile_audio_super_resolution)) | 느림(기본 설정에서 12초 클립 기준 스템당 약 70-90초), GPU 권장 | 명확한 샘플레이트/주파수 상한이 원인인 일반적인 대역폭 확장 |
+| **AudioSR** | Diffusion 기반 any→48kHz 초고해상도, 10-50회 반복 DDIM 스텝 ([haoheliu/versatile_audio_super_resolution](https://github.com/haoheliu/versatile_audio_super_resolution)) | 느림(RTX 4070 SUPER, 기본 설정, 15초 클립 기준 스템당 약 15-35초 + 작업당 모델 로딩 약 30초), GPU 권장 | 명확한 샘플레이트/주파수 상한이 원인인 일반적인 대역폭 확장 |
 | **FlashSR** | Single-step distillation 기반 any→48kHz ([jakeoneijk/FlashSR_Inference](https://github.com/jakeoneijk/FlashSR_Inference)) | 빠름 — AudioSR의 반복 루프 대신 윈도우당 한 번의 forward pass만 필요 | AudioSR 방식의 대역폭 확장은 원하지만 AudioSR의 속도는 받아들이기 어려운 경우 |
 
 복원은 **작업별 선택 사항**이며 원본 스템을 항상 보존하므로 언제든 비교할 수 있습니다.
 
 > **참고:**
-> - AudioSR CLI는 스테레오 입력이더라도 출력을 모노로 다운믹스합니다 — 이는 이 프로젝트의 통합 방식이 아니라 AudioSR 자체의 특성입니다. Apollo와 FlashSR은 원본 채널 수를 그대로 유지합니다.
+> - AudioSR은 스테레오 입력이더라도 출력을 모노로 다운믹스합니다 — 이는 이 프로젝트의 통합 방식이 아니라 AudioSR 자체의 특성입니다. Apollo와 FlashSR은 원본 채널 수를 그대로 유지합니다.
 > - **FlashSR은 저장소에 라이선스가 명시되어 있지 않습니다.** 평가해볼 수 있도록 옵션으로 제공하지만, 실험 이상의 용도로 사용하기 전에 라이선스 조건을 직접 확인하세요. 아키텍처 계보(HierSpeech++)가 음성 중심이라 음악에서의 품질은 이 프로젝트에서 별도로 검증하지 않았습니다.
 
 ### 조사했지만 포함하지 않은 모델
@@ -124,6 +124,8 @@ web_audio_splitter/
 │   ├── restore.py           # 복원 디스패치 (Apollo / AudioSR / FlashSR)
 │   ├── apollo_infer.py      # 독립 실행형 Apollo 추론 래퍼 (청크 처리, CPU/GPU)
 │   ├── flashsr_infer.py     # 독립 실행형 FlashSR 추론 래퍼 (청크 처리, CPU/GPU)
+│   ├── audiosr_infer.py     # 독립 실행형 AudioSR 추론 래퍼
+│   ├── infer_cli.py         # 래퍼 공통 배치/진행률 처리 (작업당 모델 1회 로딩)
 │   ├── requirements.txt     # Python 의존성
 │   ├── Dockerfile           # 백엔드 컨테이너 설정 (Apollo + FlashSR 벤더링 포함)
 │   └── media/               # 업로드/분리/복원된 오디오 및 캐시된 스펙트로그램

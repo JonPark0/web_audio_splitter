@@ -12,7 +12,7 @@ yt-dlp
 bs-roformer-infer
 
 # --- Recovery stage (frequency restoration) ---
-# AudioSR: installable CLI, driven as a subprocess from restore.py
+# AudioSR: used via its Python API from backend/audiosr_infer.py (subprocess)
 audiosr==0.0.7
 # Apollo (backend/apollo_infer.py) is vendored from its GitHub repo at
 # Docker build time (see backend/Dockerfile) rather than pip-installed, since
