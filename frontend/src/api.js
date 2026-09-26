@@ -54,6 +54,12 @@ export function getStatus(taskId) {
   return axios.get(`${API_BASE}/status/${taskId}`);
 }
 
+// Task state lives in the backend's memory, so a restart forgets every task
+// and /status answers 404 from then on — polling can never recover from that.
+export function isTaskGone(err) {
+  return err?.response?.status === 404;
+}
+
 export function getResult(taskId) {
   return axios.get(`${API_BASE}/result/${taskId}`);
 }

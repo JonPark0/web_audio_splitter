@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { getStatus, youtubeConfirm, youtubePreviewUrl } from '../api';
+import { getStatus, isTaskGone, youtubeConfirm, youtubePreviewUrl } from '../api';
 import ErrorBanner from './ErrorBanner';
 import Split from './Split';
 import TextButton from './TextButton';
@@ -22,6 +22,11 @@ export default function YouTubeConfirmScreen({ taskId, ytMeta, setStep }) {
         setDownloadStatus(status);
         if (status === 'downloaded' || status === 'download_failed') return;
       } catch (e) {
+        if (cancelled) return;
+        if (isTaskGone(e)) {
+          setDownloadStatus('missing');
+          return;
+        }
         console.error(e);
       }
       if (!cancelled) timer = setTimeout(poll, 1500);
@@ -69,10 +74,13 @@ export default function YouTubeConfirmScreen({ taskId, ytMeta, setStep }) {
           </p>
         )}
 
-        {downloadStatus === 'download_failed' && (
+        {(downloadStatus === 'download_failed' || downloadStatus === 'missing') && (
           <div className="flex flex-col items-center gap-4 md:items-start">
             <p className="m-0" role="alert">
-              <span className="text-muted">Error — </span>Download failed. Please try again.
+              <span className="text-muted">Error — </span>
+              {downloadStatus === 'missing'
+                ? 'This download is no longer on the server (it may have restarted). Please try again.'
+                : 'Download failed. Please try again.'}
             </p>
             <TextButton onClick={() => setStep('upload')}>Go Back</TextButton>
           </div>

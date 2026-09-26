@@ -25,6 +25,7 @@ export default memo(function TrackRow({
   onToggleSolo,
   surfers,
   onReady,
+  onFinish,
   onSeek,
 }) {
   const containerRef = useRef(null);
@@ -70,6 +71,8 @@ export default memo(function TrackRow({
     ws.on('error', (err) => {
       console.error(`[TrackRow ${trackName}] wavesurfer error:`, err);
     });
+
+    ws.on('finish', () => onFinish());
 
     ws.on('interaction', (newTime) => {
       const duration = ws.getDuration();

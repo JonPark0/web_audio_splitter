@@ -38,6 +38,17 @@ export default function Mixer({ taskId, tracks, recoveredTracks }) {
   const handleToggleMute = useCallback((t) => setMuted((s) => ({ ...s, [t]: !s[t] })), []);
   const handleToggleSolo = useCallback((t) => setSoloed((s) => ({ ...s, [t]: !s[t] })), []);
   const handleReady = useCallback(() => setReadyCount((c) => c + 1), []);
+  // The first track to reach the end stops and rewinds them all, so the
+  // button returns to "Play" and the next press starts from the top. Stems
+  // can differ by a few ms (resampled recoveries), so the rest are paused
+  // rather than left to finish on their own.
+  const handleFinish = useCallback(() => {
+    setIsPlaying(false);
+    Object.values(surfers.current).forEach((ws) => {
+      ws.pause();
+      ws.seekTo(0);
+    });
+  }, []);
 
   return (
     <div className="flex w-full flex-col gap-6">
@@ -75,6 +86,7 @@ export default function Mixer({ taskId, tracks, recoveredTracks }) {
             onToggleSolo={handleToggleSolo}
             surfers={surfers}
             onReady={handleReady}
+            onFinish={handleFinish}
             onSeek={handleSeek}
           />
         ))}

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { getStatus, getResult } from '../api';
+import { getStatus, getResult, isTaskGone } from '../api';
 import ProgressStages from './ProgressStages';
 import ErrorBanner from './ErrorBanner';
 import Split from './Split';
@@ -33,6 +33,11 @@ export default function ProcessingScreen({ taskId, recoveryState, setStep, setRe
           return;
         }
       } catch (e) {
+        if (cancelled) return;
+        if (isTaskGone(e)) {
+          setError('This task is no longer on the server (it may have restarted). Please start over.');
+          return;
+        }
         console.error(e);
       }
       if (!cancelled) timer = setTimeout(poll, 2000);
