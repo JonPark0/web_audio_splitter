@@ -37,6 +37,7 @@ services:
       - AUDIOSR_DDIM_STEPS=${AUDIOSR_DDIM_STEPS:-50}
       - AUDIOSR_GUIDANCE_SCALE=${AUDIOSR_GUIDANCE_SCALE:-3.5}
       - AUDIOSR_MODEL_NAME=${AUDIOSR_MODEL_NAME:-basic}
+      - MEDIA_RETENTION_DAYS=${MEDIA_RETENTION_DAYS:-0}
       - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-splitter}:${POSTGRES_PASSWORD:-splitter}@db:5432/${POSTGRES_DB:-splitter}
     depends_on:
       db:

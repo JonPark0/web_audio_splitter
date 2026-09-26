@@ -6,9 +6,10 @@ column fields plus everything in `meta` merged at the top level — so the
 pipeline and endpoints didn't need restructuring, only their reads/writes.
 """
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import cast, select, update
+from sqlalchemy import cast, delete, select, update
 from sqlalchemy.dialects.postgresql import JSONB
 
 from db import session_scope
@@ -80,6 +81,22 @@ def update_task(task_id: str, **fields) -> None:
 def list_tasks(limit: int = 50) -> list[dict]:
     with session_scope() as session:
         rows = session.scalars(select(Task).order_by(Task.created_at.desc()).limit(limit)).all()
+        return [_to_dict(t) for t in rows]
+
+
+def delete_task_row(task_id: str) -> None:
+    """Remove the job row. Samples made from it keep their audio (they're
+    copies); their source_task_id is set to NULL by the foreign key."""
+    with session_scope() as session:
+        session.execute(delete(Task).where(Task.id == uuid.UUID(task_id)))
+
+
+def list_tasks_older_than(days: float) -> list[dict]:
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    with session_scope() as session:
+        rows = session.scalars(
+            select(Task).where(Task.created_at < cutoff, Task.status.not_in(IN_FLIGHT_STATUSES))
+        ).all()
         return [_to_dict(t) for t in rows]
 
 

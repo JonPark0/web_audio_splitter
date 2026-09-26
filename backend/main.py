@@ -1,3 +1,4 @@
+import asyncio
 import os
 import shutil
 import uuid
@@ -5,19 +6,30 @@ import subprocess
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, UploadFile, File, BackgroundTasks, HTTPException, Form
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 import yt_dlp
 
 import projects
 import samples
 from restore import restore_stems, RestoreError, SUPPORTED_MODELS, DEFAULT_MODEL
-from separate import separate_audio, SeparationError, DERIVED_STEMS
+from separate import separate_audio, SeparationError, DERIVED_STEMS, DEMUCS_MODELS, BS_ROFORMER_MODEL
 from storage import (
     IMMUTABLE_CACHE_HEADERS, OUTPUT_DIR, RECOVERED_SUBDIR, SPECTROGRAM_DIR, UPLOAD_DIR,
     stems_dir, track_path,
 )
-from task_store import create_task, fail_interrupted_tasks, get_task, list_tasks, update_task
+from task_store import (
+    IN_FLIGHT_STATUSES, create_task, delete_task_row, fail_interrupted_tasks, get_task,
+    list_tasks, list_tasks_older_than, update_task,
+)
+
+SEPARATION_MODELS = DEMUCS_MODELS | {BS_ROFORMER_MODEL}
+# Opt-in cleanup: jobs older than this many days have their uploaded audio,
+# stems and spectrograms deleted (library samples are copies and survive).
+# 0 / unset = keep everything.
+MEDIA_RETENTION_DAYS = float(os.getenv("MEDIA_RETENTION_DAYS", "0") or 0)
+RETENTION_CHECK_SECONDS = 6 * 3600
 
 
 @asynccontextmanager
@@ -27,7 +39,39 @@ async def lifespan(app: FastAPI):
     interrupted = fail_interrupted_tasks()
     if interrupted:
         print(f"Marked {interrupted} interrupted task(s) as failed")
+    cleanup = asyncio.create_task(_retention_loop()) if MEDIA_RETENTION_DAYS > 0 else None
     yield
+    if cleanup:
+        cleanup.cancel()
+
+
+async def _retention_loop():
+    while True:
+        try:
+            removed = await asyncio.to_thread(purge_old_tasks, MEDIA_RETENTION_DAYS)
+            if removed:
+                print(f"Retention: removed {removed} job(s) older than {MEDIA_RETENTION_DAYS:g} day(s)")
+        except Exception as e:
+            print(f"Retention cleanup failed: {e}")
+        await asyncio.sleep(RETENTION_CHECK_SECONDS)
+
+
+def remove_task(task: dict) -> None:
+    """Delete a job's uploaded audio, stems (incl. recovered) and cached
+    spectrograms, then its row."""
+    file_path = task.get("file_path")
+    if file_path and Path(file_path).resolve().parent == UPLOAD_DIR.resolve():
+        Path(file_path).unlink(missing_ok=True)
+    shutil.rmtree(stems_dir(task), ignore_errors=True)
+    shutil.rmtree(SPECTROGRAM_DIR / task["id"], ignore_errors=True)
+    delete_task_row(task["id"])
+
+
+def purge_old_tasks(days: float) -> int:
+    old = list_tasks_older_than(days)
+    for task in old:
+        remove_task(task)
+    return len(old)
 
 
 app = FastAPI(lifespan=lifespan)
@@ -317,10 +361,70 @@ def get_tasks(limit: int = 50):
                 "recovery_model": t["recovery_model"],
                 "created_at": t["created_at"],
                 "error": t.get("error"),
+                "retry_of": t.get("retry_of"),
             }
             for t in list_tasks(min(max(limit, 1), 200))
         ]
     }
+
+
+class RetryRequest(BaseModel):
+    model: str = "htdemucs"
+    recover: bool = False
+    recovery_model: str = DEFAULT_MODEL
+
+
+@app.post("/tasks/{task_id}/retry", status_code=201)
+def retry_task(task_id: str, body: RetryRequest, background_tasks: BackgroundTasks):
+    """Run a finished job's source audio again with other settings, as a new
+    job; the original job and its stems are kept."""
+    task = get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if body.model not in SEPARATION_MODELS:
+        raise HTTPException(status_code=400, detail=f"Unknown model '{body.model}'")
+    if body.recover and body.recovery_model.lower() not in SUPPORTED_MODELS:
+        raise HTTPException(status_code=400, detail=f"Unknown recovery_model '{body.recovery_model}'")
+    src = task.get("file_path")
+    if task["status"] in ("downloading", "download_failed") or not src or not Path(src).is_file():
+        raise HTTPException(status_code=400, detail="The source audio for this job is no longer available")
+
+    # The separators name their output after the input file's stem, and the
+    # stems directory is keyed by task id — so the new job needs its own
+    # <new id>.<ext> copy. A hard link costs no space where supported.
+    new_id = str(uuid.uuid4())
+    new_path = UPLOAD_DIR / f"{new_id}{Path(src).suffix}"
+    try:
+        os.link(src, new_path)
+    except OSError:
+        shutil.copy2(src, new_path)
+
+    inherited = {k: task[k] for k in ("title", "thumbnail", "duration", "duration_formatted") if k in task}
+    create_task(
+        new_id,
+        kind=task["kind"],
+        status="queued",
+        model=body.model,
+        recover=body.recover,
+        recovery_model=body.recovery_model,
+        source_name=task["source_name"],
+        file_path=str(new_path),
+        retry_of=task["id"],
+        **inherited,
+    )
+    background_tasks.add_task(process_audio, new_id, new_path, body.model, body.recover, body.recovery_model)
+    return {"task_id": new_id}
+
+
+@app.delete("/tasks/{task_id}", status_code=204)
+def delete_task(task_id: str):
+    task = get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task["status"] in IN_FLIGHT_STATUSES:
+        raise HTTPException(status_code=409, detail="This job is still running")
+    remove_task(task)
+    return Response(status_code=204)
 
 
 @app.get("/status/{task_id}")
