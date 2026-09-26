@@ -445,7 +445,13 @@ export function createEngine() {
     await Promise.all(
       items.map(async ({ clip, sample }) => {
         const url = needsRender(clip, sample, proj.bpm) ? renderKey(clip, sample, proj.bpm) : sampleAudioUrl(sample);
-        buffers.set(clip.id, await load(url));
+        try {
+          buffers.set(clip.id, await load(url));
+        } catch (e) {
+          // Name the sample: a bare "404 fetching audio" doesn't say which
+          // clip broke the whole mixdown.
+          throw new Error(`Could not load audio for "${sample.name}" (${e.message})`);
+        }
       })
     );
 
