@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { FiUpload } from 'react-icons/fi';
 import {
   analyzeSample,
   deleteSample,
@@ -185,23 +184,19 @@ export default function LibraryScreen() {
     }
   };
 
+  // Words only, like Palnarium's "Add New Image": the icon added nothing the
+  // word doesn't already say.
   const importButton = (
-    <TextButton
-      label={importing ? 'Importing…' : 'Import File'}
-      onClick={() => fileInputRef.current?.click()}
-      disabled={importing}
-    >
-      <span className="inline-flex items-center gap-2">
-        <FiUpload className="icon" strokeWidth={1.5} aria-hidden="true" />
-        <span>{importing ? 'Importing…' : 'Import File'}</span>
-      </span>
+    <TextButton onClick={() => fileInputRef.current?.click()} disabled={importing}>
+      {importing ? 'Importing…' : 'Import File'}
     </TextButton>
   );
 
   return (
     <div className="flex w-full flex-col">
-      <div className="mx-auto mb-12 mt-8 max-w-[720px] text-center md:mb-16 md:mt-16">
-        <h1 className="m-0 mb-3 text-title-sm font-light leading-tight md:text-title">Sample Library</h1>
+      {/* Palnarium content head: frame width, s-8 above, s-10 below */}
+      <div className="mx-auto mb-20 mt-16 max-w-frame text-center">
+        <h1 className="m-0 mb-3 text-title-sm font-light md:text-title">Sample Library</h1>
         <p className="m-0 mb-4 text-h3">
           {loaded ? `${samples.length} ${samples.length === 1 ? 'sample' : 'samples'}` : ' '}
         </p>
@@ -229,8 +224,9 @@ export default function LibraryScreen() {
           active={filtersActive}
         />
 
+        {/* States are one quiet sentence, no rules (Palnarium .list__empty). */}
         {!loaded ? (
-          <div className="flex justify-center border-t border-line py-10 text-muted">
+          <div className="flex justify-center py-10 text-muted">
             {error ? (
               <TextButton
                 onClick={() => {
@@ -246,25 +242,28 @@ export default function LibraryScreen() {
             )}
           </div>
         ) : samples.length === 0 ? (
-          <div className="flex flex-col items-center gap-3 border-t border-line py-12 text-center">
+          <div className="flex flex-col items-center gap-3 py-12 text-center">
             {filtersActive ? (
               <>
-                <p className="m-0 text-h4">No samples match these filters.</p>
-                <TextButton muted onClick={() => setFilters((f) => ({ ...EMPTY_FILTERS, sort: f.sort }))}>
+                <p className="m-0 text-muted">No samples match these filters.</p>
+                <TextButton onClick={() => setFilters((f) => ({ ...EMPTY_FILTERS, sort: f.sort }))}>
                   Clear filters
                 </TextButton>
               </>
             ) : (
               <>
-                <p className="m-0 text-h4">No samples yet.</p>
-                <p className="m-0 max-w-[480px] text-muted">
+                <p className="m-0 text-muted">No samples yet.</p>
+                {/* how to get started is read to act on, so it stays ink */}
+                <p className="m-0 max-w-measure">
                   Select a region on a stem in the Split screen to extract it here, or import an audio file.
                 </p>
               </>
             )}
           </div>
         ) : (
-          <div className="flex flex-col border-b border-line">
+          // Editable rows = Palnarium admin rows: a hairline *between* rows
+          // only, never capping the list.
+          <div className="flex flex-col divide-y divide-line">
             {samples.map((s) => (
               <SampleRow
                 key={s.id}

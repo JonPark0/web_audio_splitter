@@ -1,5 +1,5 @@
 import React, { memo, useCallback, useState } from 'react';
-import { FiDownload, FiPlay, FiSquare } from 'react-icons/fi';
+import { FiPlay, FiSquare } from 'react-icons/fi';
 import { sampleAudioUrl } from '../../samplesApi';
 import TextButton from '../TextButton';
 import BpmControl from './BpmControl';
@@ -33,9 +33,12 @@ export default memo(function SampleRow({ sample, playing, audioRef, onTogglePlay
   const status = sample.analysis_status;
 
   return (
-    <div className="border-t border-line py-5">
+    // Palnarium admin-row padding (s-2.5); the list draws the rules between rows.
+    <div className="py-5">
       <div className="flex flex-col gap-4 md:flex-row md:flex-wrap md:items-start md:gap-x-8 md:gap-y-5 xl:flex-nowrap">
         <div className="flex min-w-0 items-start gap-4 md:basis-full xl:flex-1 xl:basis-0">
+          {/* Play/stop stays a glyph (transport convention, shared with the
+              Arrange browser); .icon thickens on hover like link text. */}
           <TextButton
             onClick={() => onTogglePlay(sample)}
             label=""
@@ -43,7 +46,7 @@ export default memo(function SampleRow({ sample, playing, audioRef, onTogglePlay
             aria-pressed={playing}
             title={playing ? 'Stop' : 'Play'}
             current={playing}
-            className="mt-0.5 shrink-0 text-h3"
+            className="shrink-0 text-h3"
           >
             {playing ? (
               <FiSquare className="icon" strokeWidth={1.5} aria-hidden="true" />
@@ -87,17 +90,8 @@ export default memo(function SampleRow({ sample, playing, audioRef, onTogglePlay
         </div>
 
         <div className="flex flex-wrap items-baseline gap-x-5 gap-y-2 text-caption md:shrink-0 xl:w-44 xl:justify-end">
-          <TextButton
-            as="a"
-            href={sampleAudioUrl(sample)}
-            download={downloadName(sample.name)}
-            label="Download"
-            title="Download WAV"
-          >
-            <span className="inline-flex items-center gap-2">
-              <FiDownload className="icon" strokeWidth={1.5} aria-hidden="true" />
-              <span>Download</span>
-            </span>
+          <TextButton as="a" href={sampleAudioUrl(sample)} download={downloadName(sample.name)} title="Download WAV">
+            Download
           </TextButton>
           <DeleteControl busy={busy} onDelete={() => run(() => onDelete(sample.id))} />
         </div>

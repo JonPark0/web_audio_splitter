@@ -18,7 +18,8 @@ export default function DeleteControl({ busy, onDelete }) {
       className="inline-flex flex-wrap items-baseline gap-x-3 gap-y-1"
       onKeyDown={(e) => e.key === 'Escape' && setConfirming(false)}
     >
-      <span className="text-muted">Delete?</span>
+      {/* the question is what the reader acts on, so ink (muted is for asides) */}
+      <span>Delete?</span>
       <TextButton autoFocus disabled={busy} onClick={onDelete}>
         Confirm
       </TextButton>
