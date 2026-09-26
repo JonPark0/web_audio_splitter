@@ -19,6 +19,9 @@ A web application to separate audio files into individual tracks (Vocals, Drums,
   - Per-track spectrogram view to see the recovered high-frequency content, not just hear it.
   - Export/Download each track separately (original or recovered).
 - **Staged Progress:** Real progress through Separating → Restoring, not just a spinner.
+- **Sample Extraction:** Select a region on any stem's waveform (original or recovered) and save it as a sample — cut sample-accurately on the server.
+- **Sample Library:** Search, tag and preview saved samples. BPM and key are detected automatically; correct the BPM (×2 / ÷2, direct entry, tap tempo) or override the key. Your own audio files can be imported too.
+- **Job History:** Jobs are stored in PostgreSQL, so past results can be reopened after a restart.
 - **GPU Support:** Optional NVIDIA GPU acceleration via Docker.
 
 ## Quick Start
@@ -34,11 +37,15 @@ DEMUCS_SHIFTS=0
 AUDIOSR_DDIM_STEPS=50
 AUDIOSR_GUIDANCE_SCALE=3.5
 AUDIOSR_MODEL_NAME=basic
+POSTGRES_USER=splitter
+POSTGRES_PASSWORD=splitter
+POSTGRES_DB=splitter
 ```
 - `DEMUCS_SHIFTS`: Controls separation quality (higher values = better quality but slower processing):
   - `0`: Default, fastest (recommended for CPU)
   - `1-5`: Higher quality, slower processing (recommended for GPU)
 - `AUDIOSR_DDIM_STEPS` / `AUDIOSR_GUIDANCE_SCALE` / `AUDIOSR_MODEL_NAME`: Only apply when the AudioSR recovery model is selected in the UI; see [Recovery Models](#recovery-models) below.
+- `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB`: Credentials for the bundled PostgreSQL 18 service (`db`). It is only reachable inside the compose network unless you publish its port. Schema migrations run automatically when the backend starts.
 
 > **First build note:** the backend image now clones [JusperLee/Apollo](https://github.com/JusperLee/Apollo) and prefetches its checkpoint at build time, so `docker compose ... up --build` will take noticeably longer and produce a larger image the first time.
 
@@ -65,6 +72,8 @@ Once the build is complete:
 1. **Upload:** Select an audio file (or paste a YouTube URL) on the main page. Optionally enable "Restore missing frequencies" and pick a recovery model.
 2. **Process:** Wait for the AI to process the file — the progress bar shows Separating, then Restoring if recovery is on.
 3. **Result:** Use the play button to listen to all tracks. Adjust volumes, mute/solo individual stems, toggle Original vs. Recovered per track, view each stem's spectrogram, and download the tracks you want.
+4. **Extract samples:** Click **Extract** on a track, drag across its waveform to select a region, preview it, name it and **Save sample**. The current Original/Recovered choice is what gets saved.
+5. **Library:** Open the **Library** tab to browse samples, fix BPM/key, tag, download or delete them. Past jobs are listed under **Recent jobs** on the upload page.
 
 ## Separation Models
 
@@ -102,6 +111,9 @@ A few models came up in research (via Gemini and independently) that looked prom
 - **FlashSR** - Single-step distilled any→48kHz audio super-resolution
 - **PyTorch** - Deep learning framework (CPU/GPU support)
 - **Uvicorn** - ASGI server
+- **PostgreSQL 18** - Job history and sample library
+- **SQLAlchemy + Alembic** - ORM and schema migrations
+- **librosa** - Sample tempo and key estimation
 
 ### Frontend
 - **React 18** - UI framework
@@ -126,6 +138,13 @@ web_audio_splitter/
 │   ├── flashsr_infer.py     # Standalone FlashSR inference wrapper (chunked, CPU/GPU)
 │   ├── audiosr_infer.py     # Standalone AudioSR inference wrapper
 │   ├── infer_cli.py         # Shared batch/progress plumbing for the wrappers (model loaded once per job)
+│   ├── samples.py           # Sample library endpoints (extract / import / list / edit)
+│   ├── analysis.py          # BPM + key estimation for samples
+│   ├── db.py / models.py    # SQLAlchemy engine/session and ORM models
+│   ├── task_store.py        # Job persistence (replaces the old in-memory dict)
+│   ├── storage.py           # media/ layout and path helpers
+│   ├── migrations/          # Alembic migrations (applied on startup)
+│   ├── requirements-app.txt # App-level deps (DB), installed in a late Docker layer
 │   ├── requirements.txt     # Python dependencies
 │   ├── Dockerfile           # Backend container configuration (vendors Apollo + FlashSR)
 │   └── media/               # Uploaded, separated, recovered audio + cached spectrograms
@@ -195,6 +214,10 @@ To enable GPU acceleration:
 - Cause: the `demucs_cache` Docker volume (mounted at `/root/.cache`, holding Apollo/AudioSR/FlashSR/BS-Roformer's downloaded checkpoints) is a **named volume** — Docker only seeds it from the image once, the first time it's created. If that volume already existed from before a model was added to the image (e.g. you built once, then pulled a newer version of this project with a new model), the container keeps using the old, incomplete volume instead of the new image's baked-in cache, and falls back to a slow/rate-limited runtime download instead of using the pre-warmed one.
 - Solution: `docker compose rm -sf backend && docker volume rm web_audio_splitter_demucs_cache` (adjust the volume name to your project folder's prefix if different), then `docker compose up -d backend` to let it reseed fresh from the current image.
 
+**Issue: resetting the database**
+- Jobs and the sample library's metadata live in the `pgdata` Docker volume (sample audio itself is under `backend/media/samples/`).
+- To start over: `docker compose -f docker-compose.gpu.yml down && docker volume rm web_audio_splitter_pgdata` (adjust the prefix to your project folder), then bring the stack up again — migrations recreate the schema.
+
 ### Performance Tips
 - **CPU Processing**: Expect 2-5 minutes for a 3-minute song
 - **GPU Processing**: Expect 30-90 seconds for a 3-minute song
@@ -210,6 +233,10 @@ cd backend
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
+pip install -r requirements-app.txt
+# Point at a running PostgreSQL 18 and create the schema
+export DATABASE_URL=postgresql+psycopg://splitter:splitter@localhost:5432/splitter
+alembic upgrade head
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
@@ -228,6 +255,8 @@ npm run dev
 | `AUDIOSR_DDIM_STEPS` | `50` | AudioSR sampling steps (higher = slower, generally better) |
 | `AUDIOSR_GUIDANCE_SCALE` | `3.5` | AudioSR guidance scale |
 | `AUDIOSR_MODEL_NAME` | `basic` | AudioSR model variant: `basic` (music/general) or `speech` |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `splitter` | Credentials for the `db` service |
+| `DATABASE_URL` | built from the above | Backend connection string (set by compose; set it yourself when running without Docker) |
 
 ### API Endpoints
 - `POST /upload` - Upload an audio file (`file`, `model`, `recover`, `recovery_model`) → `{task_id}`
@@ -239,6 +268,14 @@ npm run dev
 - `GET /result/{task_id}` - List available tracks and recovered variants
 - `GET /download/{task_id}/{track_name}?variant=original|recovered` - Download a stem
 - `GET /spectrogram/{task_id}/{track_name}?variant=original|recovered` - Rendered (and cached) spectrogram PNG
+- `GET /tasks?limit=` - Recent jobs, newest first
+- `POST /samples` - Extract a sample from a stem (JSON: `task_id`, `track`, `variant`, `start_sec`, `end_sec`, `name?`, `tags?`)
+- `POST /samples/import` - Import an audio file into the library (`file`, `name?`, `tags?`)
+- `GET /samples?q=&tag=&key=&bpm_min=&bpm_max=&sort=` - List/search samples
+- `GET /samples/tags` - Tags with usage counts
+- `GET /samples/{id}` / `PATCH /samples/{id}` / `DELETE /samples/{id}` - Read, edit (`name`, `tags`, `bpm`, `key`; `null` reverts bpm/key to the detected value), delete
+- `POST /samples/{id}/analyze` - Re-run BPM/key detection
+- `GET /samples/{id}/audio` - Sample WAV
 
 ## Credits
 
@@ -252,6 +289,8 @@ npm run dev
 - [React](https://react.dev/) - Frontend framework
 - [Tailwind CSS](https://tailwindcss.com/) - Styling
 - [WaveSurfer.js](https://wavesurfer-js.org/) - Audio visualization
+- [PostgreSQL](https://www.postgresql.org/) - Database
+- [librosa](https://librosa.org/) - Tempo and key analysis
 
 ## License
 This project is for educational and personal use. Please respect the licenses of the underlying technologies:

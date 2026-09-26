@@ -19,6 +19,9 @@ Meta Demucs AI 모델을 사용하여 오디오 파일을 개별 트랙(보컬, 
   - 복원된 고주파 내용을 직접 눈으로 확인할 수 있는 트랙별 스펙트로그램 보기
   - 각 트랙 개별 내보내기/다운로드(원본 또는 복원본)
 - **단계별 진행 표시:** 단순 로딩 표시가 아닌 분리 → 복원 단계별 실제 진행률
+- **샘플 추출:** 각 stem(원본 또는 복원본)의 파형에서 구간을 선택해 샘플로 저장합니다. 서버에서 샘플 단위로 정확하게 잘라냅니다.
+- **샘플 라이브러리:** 저장한 샘플을 검색·태그·미리듣기할 수 있습니다. BPM과 키를 자동으로 분석하고, BPM은 ×2 / ÷2, 직접 입력, 탭 템포로 보정하고 키도 직접 지정할 수 있습니다. 가지고 있는 오디오 파일을 가져올 수도 있습니다.
+- **작업 기록:** 작업이 PostgreSQL에 저장되어, 재시작한 뒤에도 이전 결과를 다시 열 수 있습니다.
 - **GPU 지원:** Docker를 통한 NVIDIA GPU 가속 지원(선택사항)
 
 ## 빠른 시작
@@ -34,11 +37,15 @@ DEMUCS_SHIFTS=0
 AUDIOSR_DDIM_STEPS=50
 AUDIOSR_GUIDANCE_SCALE=3.5
 AUDIOSR_MODEL_NAME=basic
+POSTGRES_USER=splitter
+POSTGRES_PASSWORD=splitter
+POSTGRES_DB=splitter
 ```
 - `DEMUCS_SHIFTS`: 분리 품질을 제어합니다 (값이 클수록 품질은 좋지만 처리 속도가 느려집니다):
   - `0`: 기본값, 가장 빠름 (CPU 권장)
   - `1-5`: 높은 품질, 느린 처리 (GPU 권장)
 - `AUDIOSR_DDIM_STEPS` / `AUDIOSR_GUIDANCE_SCALE` / `AUDIOSR_MODEL_NAME`: UI에서 AudioSR 복원 모델을 선택했을 때만 적용됩니다. 아래 [복원 모델](#복원-모델) 참고.
+- `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB`: 함께 실행되는 PostgreSQL 18 서비스(`db`)의 접속 정보입니다. 포트를 따로 열지 않는 한 compose 네트워크 안에서만 접근할 수 있습니다. 스키마 마이그레이션은 백엔드가 시작될 때 자동으로 실행됩니다.
 
 > **첫 빌드 참고:** 백엔드 이미지가 이제 빌드 시점에 [JusperLee/Apollo](https://github.com/JusperLee/Apollo)를 클론하고 체크포인트를 미리 받아오므로, 첫 `docker compose ... up --build`는 시간이 더 걸리고 이미지 용량도 커집니다.
 
@@ -65,6 +72,8 @@ docker compose -f docker-compose.gpu.yml up --build
 1. **업로드:** 메인 페이지에서 오디오 파일을 선택하거나 YouTube URL을 붙여넣으세요. 필요하면 "주파수 복원" 옵션을 켜고 복원 모델을 선택하세요.
 2. **처리:** AI가 파일을 처리할 때까지 기다립니다 — 진행률 표시가 분리 단계, 복원이 켜져 있다면 복원 단계까지 보여줍니다.
 3. **결과:** 재생 버튼으로 모든 트랙을 들어보세요. 볼륨 조절, 트랙별 음소거/솔로, 트랙별 원본/복원본 전환, 스펙트로그램 확인, 원하는 트랙 다운로드가 가능합니다.
+4. **샘플 추출:** 트랙의 **Extract**를 누르고 파형 위를 드래그해 구간을 선택한 뒤, 미리듣고 이름을 정해 **Save sample**을 누르세요. 그 시점에 선택된 원본/복원본이 저장됩니다.
+5. **라이브러리:** **Library** 탭에서 샘플을 둘러보고 BPM/키 보정, 태그 지정, 다운로드, 삭제를 할 수 있습니다. 이전 작업은 업로드 화면의 **Recent jobs**에 표시됩니다.
 
 ## 분리 모델
 
@@ -102,6 +111,9 @@ docker compose -f docker-compose.gpu.yml up --build
 - **FlashSR** - Single-step distillation 기반 any→48kHz 오디오 초고해상도 모델
 - **PyTorch** - 딥러닝 프레임워크 (CPU/GPU 지원)
 - **Uvicorn** - ASGI 서버
+- **PostgreSQL 18** - 작업 기록 및 샘플 라이브러리
+- **SQLAlchemy + Alembic** - ORM 및 스키마 마이그레이션
+- **librosa** - 샘플 템포 및 키 분석
 
 ### 프론트엔드
 - **React 18** - UI 프레임워크
@@ -126,6 +138,13 @@ web_audio_splitter/
 │   ├── flashsr_infer.py     # 독립 실행형 FlashSR 추론 래퍼 (청크 처리, CPU/GPU)
 │   ├── audiosr_infer.py     # 독립 실행형 AudioSR 추론 래퍼
 │   ├── infer_cli.py         # 래퍼 공통 배치/진행률 처리 (작업당 모델 1회 로딩)
+│   ├── samples.py           # 샘플 라이브러리 엔드포인트 (추출 / 가져오기 / 목록 / 편집)
+│   ├── analysis.py          # 샘플 BPM + 키 분석
+│   ├── db.py / models.py    # SQLAlchemy 엔진/세션 및 ORM 모델
+│   ├── task_store.py        # 작업 영구 저장 (기존 메모리 dict 대체)
+│   ├── storage.py           # media/ 디렉터리 구성 및 경로 헬퍼
+│   ├── migrations/          # Alembic 마이그레이션 (시작 시 자동 적용)
+│   ├── requirements-app.txt # 앱 의존성(DB), Docker 후반 레이어에서 설치
 │   ├── requirements.txt     # Python 의존성
 │   ├── Dockerfile           # 백엔드 컨테이너 설정 (Apollo + FlashSR 벤더링 포함)
 │   └── media/               # 업로드/분리/복원된 오디오 및 캐시된 스펙트로그램
@@ -195,6 +214,10 @@ GPU 가속을 활성화하려면:
 - 원인: `/root/.cache`에 마운트되는 `demucs_cache` Docker 볼륨(Apollo/AudioSR/FlashSR/BS-Roformer의 다운로드된 체크포인트 저장)은 **named volume**입니다 — Docker는 볼륨이 처음 생성될 때만 이미지 내용으로 초기화합니다. 새 모델이 이미지에 추가되기 전에 이 볼륨이 이미 존재했다면(예: 한 번 빌드한 뒤 새 모델이 추가된 최신 버전을 받은 경우), 컨테이너는 새 이미지에 미리 준비된 캐시 대신 기존의 불완전한 볼륨을 계속 사용하게 되어, 느리거나 rate-limit에 걸리는 런타임 다운로드로 넘어가게 됩니다.
 - 해결방법: `docker compose rm -sf backend && docker volume rm web_audio_splitter_demucs_cache`(프로젝트 폴더 접두사가 다르면 볼륨 이름을 맞게 조정) 실행 후 `docker compose up -d backend`로 현재 이미지 기준으로 새로 채워지도록 하세요.
 
+**문제: 데이터베이스 초기화**
+- 작업 기록과 샘플 메타데이터는 `pgdata` Docker 볼륨에 저장됩니다(샘플 오디오 파일은 `backend/media/samples/`에 있습니다).
+- 처음부터 다시 시작하려면 `docker compose -f docker-compose.gpu.yml down && docker volume rm web_audio_splitter_pgdata`(프로젝트 폴더 접두사에 맞게 조정)를 실행한 뒤 다시 띄우세요. 마이그레이션이 스키마를 다시 만듭니다.
+
 ### 성능 팁
 - **CPU 처리**: 3분 곡 기준 약 2-5분 소요
 - **GPU 처리**: 3분 곡 기준 약 30-90초 소요
@@ -210,6 +233,10 @@ cd backend
 python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
+pip install -r requirements-app.txt
+# 실행 중인 PostgreSQL 18을 지정하고 스키마 생성
+export DATABASE_URL=postgresql+psycopg://splitter:splitter@localhost:5432/splitter
+alembic upgrade head
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
@@ -228,6 +255,8 @@ npm run dev
 | `AUDIOSR_DDIM_STEPS` | `50` | AudioSR 샘플링 스텝 수 (높을수록 느리지만 대체로 품질이 좋음) |
 | `AUDIOSR_GUIDANCE_SCALE` | `3.5` | AudioSR guidance scale |
 | `AUDIOSR_MODEL_NAME` | `basic` | AudioSR 모델 종류: `basic`(음악/범용) 또는 `speech` |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `splitter` | `db` 서비스 접속 정보 |
+| `DATABASE_URL` | 위 값으로 구성 | 백엔드 DB 연결 문자열 (compose가 설정, Docker 없이 실행할 때는 직접 지정) |
 
 ### API 엔드포인트
 - `POST /upload` - 오디오 파일 업로드 (`file`, `model`, `recover`, `recovery_model`) → `{task_id}`
@@ -239,6 +268,14 @@ npm run dev
 - `GET /result/{task_id}` - 사용 가능한 트랙 및 복원본 목록 조회
 - `GET /download/{task_id}/{track_name}?variant=original|recovered` - 스템 다운로드
 - `GET /spectrogram/{task_id}/{track_name}?variant=original|recovered` - 렌더링(및 캐시)된 스펙트로그램 PNG
+- `GET /tasks?limit=` - 최근 작업 목록 (최신순)
+- `POST /samples` - stem에서 샘플 추출 (JSON: `task_id`, `track`, `variant`, `start_sec`, `end_sec`, `name?`, `tags?`)
+- `POST /samples/import` - 오디오 파일을 라이브러리로 가져오기 (`file`, `name?`, `tags?`)
+- `GET /samples?q=&tag=&key=&bpm_min=&bpm_max=&sort=` - 샘플 목록/검색
+- `GET /samples/tags` - 태그별 사용 횟수
+- `GET /samples/{id}` / `PATCH /samples/{id}` / `DELETE /samples/{id}` - 조회, 수정(`name`, `tags`, `bpm`, `key`; `null`을 보내면 bpm/key가 분석값으로 돌아감), 삭제
+- `POST /samples/{id}/analyze` - BPM/키 재분석
+- `GET /samples/{id}/audio` - 샘플 WAV
 
 ## 크레딧
 
@@ -252,6 +289,8 @@ npm run dev
 - [React](https://react.dev/) - 프론트엔드 프레임워크
 - [Tailwind CSS](https://tailwindcss.com/) - 스타일링
 - [WaveSurfer.js](https://wavesurfer-js.org/) - 오디오 시각화
+- [PostgreSQL](https://www.postgresql.org/) - 데이터베이스
+- [librosa](https://librosa.org/) - 템포 및 키 분석
 
 ## 라이선스
 이 프로젝트는 교육 및 개인 용도입니다. 기반 기술의 라이선스를 존중해주세요:
