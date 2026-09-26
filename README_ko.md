@@ -22,6 +22,8 @@ Meta Demucs AI 모델을 사용하여 오디오 파일을 개별 트랙(보컬, 
 - **샘플 추출:** 각 stem(원본 또는 복원본)의 파형에서 구간을 선택해 샘플로 저장합니다. 서버에서 샘플 단위로 정확하게 잘라냅니다.
 - **샘플 라이브러리:** 저장한 샘플을 검색·태그·미리듣기할 수 있습니다. BPM과 키를 자동으로 분석하고, BPM은 ×2 / ÷2, 직접 입력, 탭 템포로 보정하고 키도 직접 지정할 수 있습니다. 가지고 있는 오디오 파일을 가져올 수도 있습니다.
 - **작업 기록:** 작업이 PostgreSQL에 저장되어, 재시작한 뒤에도 이전 결과를 다시 열 수 있습니다.
+- **Arrangement View:** Ableton 방식의 마디/박자 타임라인 위에 트랙을 구성합니다. 라이브러리의 샘플을 트랙에 끌어다 놓고, 스냅에 맞춰 클립을 이동·트리밍·복제하고, 구간을 반복 재생할 수 있습니다. 트랙별 볼륨/팬/음소거/솔로와 메트로놈을 지원하고, 프로젝트는 PostgreSQL에 자동 저장됩니다.
+- **BPM Sync:** warp가 켜진 클립은 프로젝트 템포를 따릅니다. BPM을 바꾸면 서버에서 음정을 유지한 채 time-stretch(Rubber Band)하고 결과를 캐시합니다. 렌더링이 끝나기 전에는 속도만 바꿔 재생해서 변경을 바로 들을 수 있습니다.
 - **GPU 지원:** Docker를 통한 NVIDIA GPU 가속 지원(선택사항)
 
 ## 빠른 시작
@@ -74,6 +76,7 @@ docker compose -f docker-compose.gpu.yml up --build
 3. **결과:** 재생 버튼으로 모든 트랙을 들어보세요. 볼륨 조절, 트랙별 음소거/솔로, 트랙별 원본/복원본 전환, 스펙트로그램 확인, 원하는 트랙 다운로드가 가능합니다.
 4. **샘플 추출:** 트랙의 **Extract**를 누르고 파형 위를 드래그해 구간을 선택한 뒤, 미리듣고 이름을 정해 **Save sample**을 누르세요. 그 시점에 선택된 원본/복원본이 저장됩니다.
 5. **라이브러리:** **Library** 탭에서 샘플을 둘러보고 BPM/키 보정, 태그 지정, 다운로드, 삭제를 할 수 있습니다. 이전 작업은 업로드 화면의 **Recent jobs**에 표시됩니다.
+6. **어레인지:** **Arrange** 탭에서 프로젝트를 만들고 BPM을 정한 뒤, 샘플 브라우저에서 샘플을 트랙으로 끌어다 놓으세요. BPM이 있는 클립은 프로젝트 템포에 맞춰 warp됩니다(클립별로 켜고 끌 수 있음). 먼저 라이브러리에서 샘플 BPM을 맞춰 두세요 — 대부분의 분석 오류는 ×2 / ÷2로 고칠 수 있습니다.
 
 ## 분리 모델
 
@@ -114,6 +117,7 @@ docker compose -f docker-compose.gpu.yml up --build
 - **PostgreSQL 18** - 작업 기록 및 샘플 라이브러리
 - **SQLAlchemy + Alembic** - ORM 및 스키마 마이그레이션
 - **librosa** - 샘플 템포 및 키 분석
+- **pedalboard (Rubber Band)** - BPM Sync용 time-stretch / 피치 시프트
 
 ### 프론트엔드
 - **React 18** - UI 프레임워크
@@ -145,6 +149,7 @@ web_audio_splitter/
 │   ├── storage.py           # media/ 디렉터리 구성 및 경로 헬퍼
 │   ├── migrations/          # Alembic 마이그레이션 (시작 시 자동 적용)
 │   ├── requirements-app.txt # 앱 의존성(DB), Docker 후반 레이어에서 설치
+│   ├── projects.py          # 어레인지 프로젝트 API (문서 단위 저장)
 │   ├── requirements.txt     # Python 의존성
 │   ├── Dockerfile           # 백엔드 컨테이너 설정 (Apollo + FlashSR 벤더링 포함)
 │   └── media/               # 업로드/분리/복원된 오디오 및 캐시된 스펙트로그램
@@ -152,6 +157,7 @@ web_audio_splitter/
 │   ├── src/
 │   │   ├── App.jsx          # 최상위 셸 / 단계 라우터
 │   │   ├── api.js           # 백엔드 API 호출 통합 모듈
+│   │   ├── arrange/         # 어레인지: 데이터 모델 + 타이밍(project.js), Web Audio 엔진(engine.js), UI(ui/)
 │   │   ├── components/      # UploadScreen, Mixer, TrackRow, ProgressStages 등
 │   │   └── main.jsx         # 애플리케이션 진입점
 │   ├── tailwind.config.js   # 디자인 토큰 (색상, 그림자, 애니메이션)
@@ -276,6 +282,10 @@ npm run dev
 - `GET /samples/{id}` / `PATCH /samples/{id}` / `DELETE /samples/{id}` - 조회, 수정(`name`, `tags`, `bpm`, `key`; `null`을 보내면 bpm/key가 분석값으로 돌아감), 삭제
 - `POST /samples/{id}/analyze` - BPM/키 재분석
 - `GET /samples/{id}/audio` - 샘플 WAV
+- `GET /samples/{id}/render?bpm=&semitones=` - `bpm`으로 time-stretch / 피치 시프트한 샘플 (한 번 렌더링 후 캐시)
+- `GET /projects` / `POST /projects` - 어레인지 프로젝트 목록 / 생성
+- `GET /projects/{id}` / `PUT /projects/{id}` / `DELETE /projects/{id}` - 조회(샘플 정보 포함), 문서 전체 저장(트랙 + 클립), 삭제
+- 프로젝트에서 사용 중인 샘플을 삭제하면 `409`를 반환합니다
 
 ## 크레딧
 
@@ -291,12 +301,14 @@ npm run dev
 - [WaveSurfer.js](https://wavesurfer-js.org/) - 오디오 시각화
 - [PostgreSQL](https://www.postgresql.org/) - 데이터베이스
 - [librosa](https://librosa.org/) - 템포 및 키 분석
+- [pedalboard](https://github.com/spotify/pedalboard) / [Rubber Band](https://breakfastquay.com/rubberband/) - time-stretch 및 피치 시프트
 
 ## 라이선스
 이 프로젝트는 교육 및 개인 용도입니다. 기반 기술의 라이선스를 존중해주세요:
 - Demucs와 BS-Roformer(`bs-roformer-infer`)는 MIT 라이선스로 배포됩니다
 - FlashSR은 **라이선스가 명시되어 있지 않습니다** — 실험 이상의 용도로 사용하기 전에 직접 사용 가능 여부를 확인하세요
 - 분리된 오디오의 상업적 사용은 원본 저작권 보유자의 허가가 필요할 수 있습니다
+- pedalboard는 GPLv3입니다(GPL 라이선스인 Rubber Band 라이브러리를 포함). 이 프로젝트를 배포하기 전에 참고하세요
 
 ## 기여
 기여를 환영합니다! 이슈를 제출하거나 풀 리퀘스트를 자유롭게 보내주세요.

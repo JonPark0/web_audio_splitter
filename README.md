@@ -22,6 +22,8 @@ A web application to separate audio files into individual tracks (Vocals, Drums,
 - **Sample Extraction:** Select a region on any stem's waveform (original or recovered) and save it as a sample — cut sample-accurately on the server.
 - **Sample Library:** Search, tag and preview saved samples. BPM and key are detected automatically; correct the BPM (×2 / ÷2, direct entry, tap tempo) or override the key. Your own audio files can be imported too.
 - **Job History:** Jobs are stored in PostgreSQL, so past results can be reopened after a restart.
+- **Arrangement View:** Ableton-style tracks on a bar/beat timeline — drag samples from the library onto tracks, move/trim/duplicate clips with snapping, loop a region, per-track volume/pan/mute/solo, metronome. Projects autosave to PostgreSQL.
+- **BPM Sync:** Warped clips follow the project tempo. Changing the BPM time-stretches them server-side (Rubber Band, pitch preserved) and caches the result; until a render arrives the clip plays sped up/down so the change is heard immediately.
 - **GPU Support:** Optional NVIDIA GPU acceleration via Docker.
 
 ## Quick Start
@@ -74,6 +76,7 @@ Once the build is complete:
 3. **Result:** Use the play button to listen to all tracks. Adjust volumes, mute/solo individual stems, toggle Original vs. Recovered per track, view each stem's spectrogram, and download the tracks you want.
 4. **Extract samples:** Click **Extract** on a track, drag across its waveform to select a region, preview it, name it and **Save sample**. The current Original/Recovered choice is what gets saved.
 5. **Library:** Open the **Library** tab to browse samples, fix BPM/key, tag, download or delete them. Past jobs are listed under **Recent jobs** on the upload page.
+6. **Arrange:** Open the **Arrange** tab, create a project, set its BPM, and drag samples from the browser onto tracks. Clips with a known BPM are warped to the project tempo (toggle per clip); get the sample BPM right in the Library first — ×2 / ÷2 fixes most detection errors.
 
 ## Separation Models
 
@@ -114,6 +117,7 @@ A few models came up in research (via Gemini and independently) that looked prom
 - **PostgreSQL 18** - Job history and sample library
 - **SQLAlchemy + Alembic** - ORM and schema migrations
 - **librosa** - Sample tempo and key estimation
+- **pedalboard (Rubber Band)** - Time-stretch / pitch-shift for BPM sync
 
 ### Frontend
 - **React 18** - UI framework
@@ -145,6 +149,7 @@ web_audio_splitter/
 │   ├── storage.py           # media/ layout and path helpers
 │   ├── migrations/          # Alembic migrations (applied on startup)
 │   ├── requirements-app.txt # App-level deps (DB), installed in a late Docker layer
+│   ├── projects.py          # Arrangement projects API (whole-document save)
 │   ├── requirements.txt     # Python dependencies
 │   ├── Dockerfile           # Backend container configuration (vendors Apollo + FlashSR)
 │   └── media/               # Uploaded, separated, recovered audio + cached spectrograms
@@ -152,6 +157,7 @@ web_audio_splitter/
 │   ├── src/
 │   │   ├── App.jsx          # Top-level shell / step router
 │   │   ├── api.js           # Centralized backend API calls
+│   │   ├── arrange/         # Arrangement: data model + timing (project.js), Web Audio engine (engine.js), UI (ui/)
 │   │   ├── components/      # UploadScreen, Mixer, TrackRow, ProgressStages, etc.
 │   │   └── main.jsx         # Application entry point
 │   ├── tailwind.config.js   # Design tokens (colors, shadows, animation)
@@ -276,6 +282,10 @@ npm run dev
 - `GET /samples/{id}` / `PATCH /samples/{id}` / `DELETE /samples/{id}` - Read, edit (`name`, `tags`, `bpm`, `key`; `null` reverts bpm/key to the detected value), delete
 - `POST /samples/{id}/analyze` - Re-run BPM/key detection
 - `GET /samples/{id}/audio` - Sample WAV
+- `GET /samples/{id}/render?bpm=&semitones=` - Sample time-stretched to `bpm` / pitch-shifted (rendered once, cached)
+- `GET /projects` / `POST /projects` - List / create arrangement projects
+- `GET /projects/{id}` / `PUT /projects/{id}` / `DELETE /projects/{id}` - Read (samples embedded), save the whole document (tracks + clips), delete
+- Deleting a sample that's used in a project returns `409`
 
 ## Credits
 
@@ -291,12 +301,14 @@ npm run dev
 - [WaveSurfer.js](https://wavesurfer-js.org/) - Audio visualization
 - [PostgreSQL](https://www.postgresql.org/) - Database
 - [librosa](https://librosa.org/) - Tempo and key analysis
+- [pedalboard](https://github.com/spotify/pedalboard) / [Rubber Band](https://breakfastquay.com/rubberband/) - Time-stretching and pitch-shifting
 
 ## License
 This project is for educational and personal use. Please respect the licenses of the underlying technologies:
 - Demucs and BS-Roformer (`bs-roformer-infer`) are released under the MIT license
 - FlashSR has **no stated license** — verify acceptable use yourself before relying on it beyond experimentation
 - Commercial use of separated audio may require permission from original copyright holders
+- pedalboard is GPLv3 (it bundles the GPL Rubber Band library) — keep that in mind before distributing this project
 
 ## Contributing
 Contributions are welcome! Please feel free to submit issues or pull requests.
