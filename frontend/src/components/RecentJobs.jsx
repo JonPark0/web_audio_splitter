@@ -95,7 +95,7 @@ export default function RecentJobs({ onOpenResult, onOpenProcessing }) {
 
   return (
     <section className="mt-16 flex flex-col gap-4 md:mt-24" aria-labelledby="recent-jobs">
-      <h2 id="recent-jobs" className="m-0 text-h3 font-light">
+      <h2 id="recent-jobs" className="m-0 text-h2 font-light">
         Recent jobs
       </h2>
       {error && (
@@ -104,7 +104,7 @@ export default function RecentJobs({ onOpenResult, onOpenProcessing }) {
           {error}
         </p>
       )}
-      <ul className="m-0 flex list-none flex-col p-0">
+      <ul className="m-0 flex list-none flex-col divide-y divide-line p-0">
         {tasks.map((task) => {
           const id = task.task_id;
           const running = RUNNING.has(task.status);
@@ -113,7 +113,7 @@ export default function RecentJobs({ onOpenResult, onOpenProcessing }) {
           const retryOpen = panel?.id === id && panel.kind === 'retry';
           const confirmOpen = panel?.id === id && panel.kind === 'delete';
           return (
-            <li key={id} className="flex flex-col border-t border-line py-3">
+            <li key={id} className="flex flex-col py-5">
               <div className="flex flex-col gap-1 md:flex-row md:items-baseline md:justify-between md:gap-6">
                 <div className="flex min-w-0 flex-col">
                   <span className="truncate">{task.name || 'Untitled'}</span>
@@ -126,7 +126,7 @@ export default function RecentJobs({ onOpenResult, onOpenProcessing }) {
 
                 {confirmOpen ? (
                   <div className="flex shrink-0 items-baseline gap-4 self-start md:self-auto">
-                    <span className="text-caption text-muted">Delete job and its files?</span>
+                    <span className="text-caption">Delete job and its files?</span>
                     <TextButton disabled={deleting === id} onClick={() => remove(task)}>
                       {deleting === id ? 'Deleting...' : 'Delete'}
                     </TextButton>

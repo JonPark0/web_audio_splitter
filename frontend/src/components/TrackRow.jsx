@@ -1,7 +1,6 @@
 import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import WaveSurfer from 'wavesurfer.js';
 import RegionsPlugin from 'wavesurfer.js/dist/plugins/regions.esm.js';
-import { FiDownload, FiVolume2, FiVolumeX } from 'react-icons/fi';
 import { trackUrl } from '../api';
 import ABToggle from './ABToggle';
 import ExtractPanel from './ExtractPanel';
@@ -9,9 +8,9 @@ import SpectrogramView from './SpectrogramView';
 import TextButton from './TextButton';
 
 // Monochrome waveform: unplayed in grey, played portion + cursor in ink.
-const WAVE_COLOR = '#b4b4b0';
+const WAVE_COLOR = '#8c8c8c'; // muted
 const PROGRESS_COLOR = '#141414';
-const REGION_COLOR = 'rgba(20, 20, 20, 0.12)';
+const REGION_COLOR = 'rgba(20, 20, 20, 0.1)'; // ink at the brand's 10% wash
 
 // Memoized so dragging one row's volume slider (Mixer state change) doesn't
 // re-render every other row; Mixer keeps the callback props stable.
@@ -271,7 +270,7 @@ export default memo(function TrackRow({
   }, [audible, volume]);
 
   return (
-    <div className="border-t border-line">
+    <div>
       <div className="flex flex-col gap-4 py-6 md:flex-row md:items-stretch md:gap-8">
         <div className="flex shrink-0 flex-col justify-center gap-3 md:w-56">
           <div className="flex items-baseline justify-between gap-4">
@@ -287,11 +286,7 @@ export default memo(function TrackRow({
           </div>
 
           <div className="flex items-center gap-3">
-            {audible ? (
-              <FiVolume2 className="icon text-muted" strokeWidth={1.5} aria-hidden="true" />
-            ) : (
-              <FiVolumeX className="icon text-muted" strokeWidth={1.5} aria-hidden="true" />
-            )}
+            <span className="w-14 shrink-0 text-caption text-muted">{audible ? 'Volume' : 'Silent'}</span>
             <input
               type="range"
               min="0"
@@ -344,11 +339,8 @@ export default memo(function TrackRow({
           >
             Extract
           </TextButton>
-          <TextButton as="a" href={trackUrl(taskId, trackName, variant)} download label="Download" title="Download track">
-            <span className="inline-flex items-center gap-2">
-              <FiDownload className="icon" strokeWidth={1.5} aria-hidden="true" />
-              <span>Download</span>
-            </span>
+          <TextButton as="a" href={trackUrl(taskId, trackName, variant)} download title="Download track">
+            Download
           </TextButton>
         </div>
       </div>

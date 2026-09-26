@@ -14,7 +14,7 @@ export default function ResultScreen({ taskId, result, model, setStep, onRetried
 
   return (
     <div className="flex w-full flex-col">
-      <div className="mx-auto mb-12 mt-8 max-w-[720px] text-center md:mb-16 md:mt-16">
+      <div className="mx-auto mb-20 mt-16 max-w-frame text-center">
         <h1 className="m-0 mb-3 text-title-sm font-light leading-tight md:text-title">Your Stems</h1>
         {result?.name && <p className="m-0 mb-2 truncate text-muted">{result.name}</p>}
         <p className="m-0 mb-4 text-h3">
@@ -42,7 +42,7 @@ export default function ResultScreen({ taskId, result, model, setStep, onRetried
         </div>
         {retrying && (
           <RetryPanel
-            className="mx-auto mt-8 max-w-[480px] border-t border-line pt-6 text-left max-md:text-center"
+            className="mx-auto mt-8 max-w-measure pt-6 text-left max-md:text-center"
             taskId={taskId}
             initialModel={jobModel}
             initialRecover={!!result?.recovered}

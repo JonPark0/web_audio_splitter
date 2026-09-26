@@ -74,11 +74,10 @@ function App() {
           <span className="font-brand text-h3 uppercase leading-none tracking-[-0.01em]">Audio Splitter</span>
           <span className="mt-1 text-caption text-muted">Split &amp; Recover</span>
         </div>
-        <nav aria-label="Sections" className="flex gap-6 text-h4">
+        <nav aria-label="Sections" className="flex gap-5 text-p">
           {MODES.map((m) => (
             <TextButton
               key={m.key}
-              muted
               current={m.key === mode}
               aria-current={m.key === mode ? 'page' : undefined}
               onClick={() => setMode(m.key)}
@@ -110,7 +109,7 @@ function App() {
                   <span
                     key={s.key}
                     aria-current={s.key === step ? 'step' : undefined}
-                    className={s.key === step ? 'text-ink [font-variation-settings:"wght"_400]' : 'text-muted'}
+                    className={s.key === step ? 'text-ink weight-up' : 'text-muted'}
                   >
                     {s.label}
                   </span>
@@ -157,7 +156,7 @@ function App() {
         </div>
       </main>
 
-      <footer className="mx-auto mt-24 w-full max-w-content flex-none px-edge pb-10 pt-6 text-center text-muted md:mt-40">
+      <footer className="mx-auto mt-40 w-full max-w-content flex-none px-edge pb-10 pt-6 text-center text-muted">
         <nav aria-label="Footer" className="mb-2 flex items-center justify-center gap-4">
           <TextButton as="a" href={REPO_URL} target="_blank" rel="noreferrer">
             GitHub

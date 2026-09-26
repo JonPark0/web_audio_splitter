@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { FiPlay, FiPause } from 'react-icons/fi';
 import TrackRow from './TrackRow';
 import TextButton from './TextButton';
 import useWaveZoom from './useWaveZoom';
@@ -91,15 +90,8 @@ export default function Mixer({ taskId, tracks, recoveredTracks }) {
   return (
     <div className="flex w-full flex-col gap-6">
       <div className="flex flex-col items-center gap-2">
-        <TextButton label={isPlaying ? 'Pause' : 'Play'} onClick={togglePlay} disabled={!isReady} className="text-h2">
-          <span className="inline-flex items-center gap-3">
-            {isPlaying ? (
-              <FiPause className="icon" strokeWidth={1.5} aria-hidden="true" />
-            ) : (
-              <FiPlay className="icon" strokeWidth={1.5} aria-hidden="true" />
-            )}
-            <span>{isPlaying ? 'Pause' : 'Play'}</span>
-          </span>
+        <TextButton onClick={togglePlay} disabled={!isReady} className="text-h2">
+          {isPlaying ? 'Pause' : 'Play'}
         </TextButton>
         {!isReady ? (
           <p className="m-0 text-caption text-muted" role="status">
@@ -115,7 +107,7 @@ export default function Mixer({ taskId, tracks, recoveredTracks }) {
         )}
       </div>
 
-      <div className="flex flex-col border-b border-line">
+      <div className="flex flex-col divide-y divide-line">
         {tracks.map((track) => (
           <TrackRow
             key={track}
