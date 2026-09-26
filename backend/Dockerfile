@@ -2,21 +2,21 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Receive the build argument
-ARG USE_GPU=false
-# Pin the Apollo/FlashSR commits so the vendored inference APIs don't shift under us.
-ARG APOLLO_COMMIT=main
-ARG FLASHSR_COMMIT=main
+# Build-arg placement matters for caching: every RUN after an ARG gets it in
+# its environment, so changing the ARG's value busts the cache of all later
+# RUN steps. Each ARG is therefore declared right above the first step that
+# uses it, not at the top of the file.
 
 # Install system dependencies
-# git is needed to vendor the Apollo repo below.
+# git is needed to vendor the Apollo and FlashSR repos below.
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     libsndfile1 \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
+# Receive the build argument
+ARG USE_GPU=false
 
 # Install PyTorch based on USE_GPU
 # If false, install CPU-only version to save space
@@ -29,6 +29,10 @@ RUN if [ "$USE_GPU" = "false" ]; then \
         pip install --no-cache-dir torch torchaudio; \
     fi
 
+# Copied after the torch step so editing requirements.txt doesn't force a
+# multi-GB torch re-download.
+COPY requirements.txt .
+
 # Install remaining dependencies (demucs will use the pre-installed torch)
 RUN pip install --no-cache-dir -r requirements.txt
 
@@ -37,8 +41,21 @@ RUN pip install --no-cache-dir -r requirements.txt
 # vendored inside the Apollo repo itself, so cloning it is sufficient — it's
 # driven via backend/apollo_infer.py as a subprocess (see backend/restore.py).
 # NOTE: this noticeably increases image size (Apollo's own deps + checkpoint).
-RUN git clone --depth 1 https://github.com/JusperLee/Apollo.git /app/apollo \
-    && cd /app/apollo && git fetch --depth 1 origin $APOLLO_COMMIT && git checkout $APOLLO_COMMIT
+#
+# Pinned to the exact commit this image was built and end-to-end tested
+# against, so the vendored inference API can't shift under us (and so Docker's
+# layer cache can't silently keep serving a stale `main`). To bump, pass
+# --build-arg APOLLO_COMMIT=<full sha> (a branch/tag name also works) and
+# re-verify the recovery stage.
+# `git init` + fetch-by-SHA pulls only that one commit instead of cloning main
+# first (GitHub allows shallow fetches of any reachable SHA). .git is dropped
+# in the same layer (~90MB) — nothing reads git metadata at runtime; the code
+# is only imported/run from /app/apollo.
+ARG APOLLO_COMMIT=e84bcacc59d5455f05d86a5c97dd4aeb3c14dbb6
+RUN git init -q /app/apollo \
+    && git -C /app/apollo fetch -q --depth 1 https://github.com/JusperLee/Apollo.git "$APOLLO_COMMIT" \
+    && git -C /app/apollo -c advice.detachedHead=false checkout -q FETCH_HEAD \
+    && rm -rf /app/apollo/.git
 ENV PYTHONPATH="/app/apollo:${PYTHONPATH}"
 ENV APOLLO_REPO_ID=JusperLee/Apollo
 
@@ -60,6 +77,10 @@ ENV APOLLO_REPO_ID=JusperLee/Apollo
 # cache is preserved rather than shadowed — but if that volume already
 # exists from a prior run without this cache, it won't be retroactively
 # populated. Delete/recreate the volume if you need to force a refresh.
+#
+# The three model prefetches (Apollo, FlashSR, BS-Roformer) are deliberately
+# separate RUN steps: each is its own cached layer, so a failed download or an
+# edit to a later one doesn't re-download the earlier multi-hundred-MB ones.
 RUN python -c "\
 from huggingface_hub import hf_hub_download; \
 hf_hub_download(repo_id='JusperLee/Apollo', filename='pytorch_model.bin')"
@@ -75,11 +96,17 @@ hf_hub_download(repo_id='JusperLee/Apollo', filename='pytorch_model.bin')"
 # guessing them — the FlashSR/ and TorchJaekwon/ directories inside the repo
 # are the actual importable packages (see backend/flashsr_infer.py's
 # sys.path handling), matched to a real usage example, not the official
-# README alone (which was incomplete) — expect this integration to need a
-# real-build-and-fix pass the same way Apollo's did.
-RUN git clone --depth 1 https://github.com/jakeoneijk/FlashSR_Inference.git /app/flashsr \
-    && cd /app/flashsr && git fetch --depth 1 origin $FLASHSR_COMMIT && git checkout $FLASHSR_COMMIT \
-    && pip install --no-cache-dir .
+# README alone (which was incomplete).
+#
+# Pinned and fetched the same way as Apollo above. .git is removed only
+# *after* `pip install .` (its setup.py uses a static version today, but a
+# git-derived version would need the metadata at install time).
+ARG FLASHSR_COMMIT=2292814a7ef74f61a5479c8d96e653d2f90f369d
+RUN git init -q /app/flashsr \
+    && git -C /app/flashsr fetch -q --depth 1 https://github.com/jakeoneijk/FlashSR_Inference.git "$FLASHSR_COMMIT" \
+    && git -C /app/flashsr -c advice.detachedHead=false checkout -q FETCH_HEAD \
+    && pip install --no-cache-dir /app/flashsr \
+    && rm -rf /app/flashsr/.git
 ENV PYTHONPATH="/app/flashsr:${PYTHONPATH}"
 ENV FLASHSR_REPO_ID=jakeoneijk/FlashSR_weights
 
@@ -99,6 +126,8 @@ RUN python -c "\
 from bs_roformer import DEFAULT_MODEL, ensure_model_assets; \
 ensure_model_assets(DEFAULT_MODEL)"
 
+# Last on purpose: editing backend .py files only rebuilds from here, leaving
+# the torch/deps/vendor/model layers above cached.
 COPY . .
 
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
