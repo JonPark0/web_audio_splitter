@@ -1,0 +1,8 @@
+# App-level dependencies, installed in a late Docker layer (see Dockerfile) so
+# changing them doesn't invalidate the heavy ML layers built from
+# requirements.txt.
+
+# --- Database (PostgreSQL) ---
+sqlalchemy>=2.0,<2.1
+psycopg[binary]>=3.2,<4
+alembic>=1.13,<2

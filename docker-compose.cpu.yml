@@ -1,4 +1,26 @@
 services:
+  db:
+    image: postgres:18
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-splitter}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-splitter}
+      - POSTGRES_DB=${POSTGRES_DB:-splitter}
+    # postgres:18 images keep data under a version-specific subdirectory
+    # (PGDATA=/var/lib/postgresql/18/docker) and declare the volume at
+    # /var/lib/postgresql — mounting the old /var/lib/postgresql/data path
+    # would not persist anything.
+    volumes:
+      - pgdata:/var/lib/postgresql
+    # Not published to the host by default (local tool, avoids clashing with
+    # a local PostgreSQL). Uncomment to inspect with psql/GUI clients:
+    # ports:
+    #   - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   backend:
     build:
       context: ./backend
@@ -15,6 +37,10 @@ services:
       - AUDIOSR_DDIM_STEPS=${AUDIOSR_DDIM_STEPS:-50}
       - AUDIOSR_GUIDANCE_SCALE=${AUDIOSR_GUIDANCE_SCALE:-3.5}
       - AUDIOSR_MODEL_NAME=${AUDIOSR_MODEL_NAME:-basic}
+      - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-splitter}:${POSTGRES_PASSWORD:-splitter}@db:5432/${POSTGRES_DB:-splitter}
+    depends_on:
+      db:
+        condition: service_healthy
 
   frontend:
     build: ./frontend
@@ -30,3 +56,4 @@ services:
 
 volumes:
   demucs_cache:
+  pgdata:

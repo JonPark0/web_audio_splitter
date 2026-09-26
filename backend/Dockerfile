@@ -126,8 +126,17 @@ RUN python -c "\
 from bs_roformer import DEFAULT_MODEL, ensure_model_assets; \
 ensure_model_assets(DEFAULT_MODEL)"
 
+# Lightweight app-level deps (database access) get their own late layer:
+# editing requirements-app.txt only rebuilds from here, instead of re-running
+# the torch install, the Apollo/FlashSR vendoring and every checkpoint
+# prefetch above as an edit to requirements.txt would.
+COPY requirements-app.txt .
+RUN pip install --no-cache-dir -r requirements-app.txt
+
 # Last on purpose: editing backend .py files only rebuilds from here, leaving
 # the torch/deps/vendor/model layers above cached.
 COPY . .
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Apply pending DB migrations, then serve. compose starts this only once the
+# db service reports healthy (see docker-compose.*.yml).
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn main:app --host 0.0.0.0 --port 8000"]
