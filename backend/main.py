@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 import yt_dlp
 
+import projects
 import samples
 from restore import restore_stems, RestoreError, SUPPORTED_MODELS, DEFAULT_MODEL
 from separate import separate_audio, SeparationError, DERIVED_STEMS
@@ -42,6 +43,7 @@ app.add_middleware(
 )
 
 app.include_router(samples.router)
+app.include_router(projects.router)
 
 MAX_DURATION_SECONDS = 1800  # 30 minutes
 

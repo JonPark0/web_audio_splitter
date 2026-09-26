@@ -6,3 +6,8 @@
 sqlalchemy>=2.0,<2.1
 psycopg[binary]>=3.2,<4
 alembic>=1.13,<2
+
+# --- Arrangement: time-stretch / pitch-shift (Rubber Band bindings) ---
+# Pinned: pedalboard 0.9.25's wheel dies with "Illegal instruction" on import
+# on AVX2-only CPUs (no AVX-512); 0.9.16 runs.
+pedalboard==0.9.16

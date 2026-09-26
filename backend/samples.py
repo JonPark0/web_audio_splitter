@@ -2,6 +2,7 @@
 Sample library endpoints: extract a region of a separated stem (or import a
 file) as a standalone sample, analyze its tempo/key, and browse/edit/delete.
 """
+import os
 import shutil
 import subprocess
 import uuid
@@ -9,20 +10,24 @@ from pathlib import Path
 from typing import Literal, Optional
 
 import soundfile as sf
-from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Response, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Query, Response, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
 import analysis
 from db import session_scope
-from models import Sample
+from models import Clip, Project, ProjectTrack, Sample
 from storage import IMMUTABLE_CACHE_HEADERS, SAMPLES_DIR, track_path
 from task_store import get_task, parse_id
 
 router = APIRouter(prefix="/samples", tags=["samples"])
 
 MIN_SAMPLE_SECONDS = 0.05
+# Time-stretched / pitch-shifted copies for the arrangement, keyed by source
+# BPM, target BPM and semitones (see render_sample).
+RENDER_DIR = SAMPLES_DIR / "renders"
+RENDER_DIR.mkdir(parents=True, exist_ok=True)
 BPM_RANGE = (20.0, 999.0)
 SORTS = ("newest", "oldest", "name", "bpm")
 
@@ -291,6 +296,7 @@ def update_sample(sample_id: str, body: SampleUpdate):
             if body.bpm is not None and not (BPM_RANGE[0] <= body.bpm <= BPM_RANGE[1]):
                 raise HTTPException(status_code=400, detail=f"BPM must be between {BPM_RANGE[0]:g} and {BPM_RANGE[1]:g}")
             sample.bpm_override = round(body.bpm, 2) if body.bpm is not None else None
+            _drop_renders(sample.id)  # stretched against the old source BPM
         if "key" in fields:
             if body.key is not None and body.key not in analysis.VALID_KEYS:
                 raise HTTPException(status_code=400, detail="Unknown key")
@@ -317,10 +323,70 @@ def reanalyze_sample(sample_id: str, background_tasks: BackgroundTasks):
 def delete_sample(sample_id: str):
     with session_scope() as session:
         sample = _get_or_404(session, sample_id)
+        used_in = session.scalars(
+            select(Project.name)
+            .join(ProjectTrack, ProjectTrack.project_id == Project.id)
+            .join(Clip, Clip.track_id == ProjectTrack.id)
+            .where(Clip.sample_id == sample.id)
+            .distinct()
+        ).all()
+        if used_in:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Sample is used in project(s): {', '.join(used_in)}. Remove its clips first.",
+            )
         path = Path(sample.file_path)
         session.delete(sample)
     path.unlink(missing_ok=True)
+    _drop_renders(uuid.UUID(sample_id))
     return Response(status_code=204)
+
+
+def _drop_renders(sample_id: uuid.UUID) -> None:
+    for f in RENDER_DIR.glob(f"{sample_id}_*.wav"):
+        f.unlink(missing_ok=True)
+
+
+@router.get("/{sample_id}/render")
+def render_sample(
+    sample_id: str,
+    bpm: float = Query(ge=BPM_RANGE[0], le=BPM_RANGE[1]),
+    semitones: int = Query(default=0, ge=-24, le=24),
+):
+    """The sample time-stretched from its own BPM to `bpm` and pitch-shifted
+    by `semitones`, rendered once with Rubber Band (pedalboard) and cached.
+
+    Without a sample BPM only the pitch shift applies. Any extra query
+    params (the client adds the source BPM) only serve as a browser
+    cache-buster.
+    """
+    with session_scope() as session:
+        sample = _get_or_404(session, sample_id)
+        path = Path(sample.file_path)
+        src_bpm = sample.bpm_override if sample.bpm_override is not None else sample.bpm_detected
+
+    factor = bpm / src_bpm if src_bpm else 1.0
+    if abs(factor - 1.0) < 1e-4 and semitones == 0:
+        return FileResponse(path, media_type="audio/wav", headers=IMMUTABLE_CACHE_HEADERS)
+
+    cache_path = RENDER_DIR / f"{sample.id}_{src_bpm or 0:.2f}_{bpm:.2f}_{semitones}.wav"
+    if not cache_path.exists():
+        import numpy as np
+        import pedalboard  # pinned to a build that runs on AVX2-only CPUs (see requirements-app.txt)
+
+        audio, sr = sf.read(str(path), dtype="float32", always_2d=True)
+        # stretch_factor > 1 speeds up (shorter output): 1.25 turned 44100
+        # frames into 35280, verified empirically.
+        out = pedalboard.time_stretch(
+            np.ascontiguousarray(audio.T), sr,
+            stretch_factor=factor, pitch_shift_in_semitones=float(semitones), high_quality=True,
+        )
+        # FLOAT: stretching can push peaks past 1.0, which PCM would clip.
+        tmp_path = RENDER_DIR / f".tmp_{uuid.uuid4()}.wav"
+        sf.write(str(tmp_path), out.T, sr, subtype="FLOAT")
+        os.replace(tmp_path, cache_path)  # atomic, so concurrent requests never read a partial file
+
+    return FileResponse(cache_path, media_type="audio/wav", headers=IMMUTABLE_CACHE_HEADERS)
 
 
 @router.get("/{sample_id}/audio")
