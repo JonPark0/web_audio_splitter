@@ -5,3 +5,28 @@ demucs==4.0.1
 soundfile
 torchcodec
 yt-dlp
+
+# --- Separation stage: alternate engine (backend/separate.py) ---
+# BS-Roformer: pip-installable CLI with automatic checkpoint download/cache,
+# no vendoring needed (unlike Apollo/FlashSR below).
+bs-roformer-infer
+
+# --- Recovery stage (frequency restoration) ---
+# AudioSR: installable CLI, driven as a subprocess from restore.py
+audiosr==0.0.7
+# Apollo (backend/apollo_infer.py) is vendored from its GitHub repo at
+# Docker build time (see backend/Dockerfile) rather than pip-installed, since
+# it isn't published as a package (look2hear/ ships inside the Apollo repo
+# itself). These are its inference-time dependencies, taken from its
+# look2hear.yml conda env — omegaconf/hydra-core are required because
+# `import look2hear.models` pulls them in at import time, not just for
+# training; training/eval-only deps (torchmetrics, fast-bss-eval,
+# torch-mir-eval, visqol) are intentionally omitted to keep the image lean:
+# Pinned to the versions in Apollo's own look2hear.yml conda env to reduce
+# the odds of a newer pytorch-lightning/omegaconf/hydra-core breaking an
+# import written against these — un-pin only after re-verifying the build.
+pytorch-lightning==2.2.1
+omegaconf==2.3.0
+hydra-core==1.3.2
+librosa
+huggingface_hub==0.24.6

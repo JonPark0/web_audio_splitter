@@ -9,6 +9,9 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import yt_dlp
 
+from restore import restore_stem, RestoreError, SUPPORTED_MODELS, DEFAULT_MODEL
+from separate import separate_audio, SeparationError
+
 app = FastAPI()
 
 # CORS configuration
@@ -23,10 +26,13 @@ app.add_middleware(
 
 UPLOAD_DIR = Path("media/uploads")
 OUTPUT_DIR = Path("media/separated")
+SPECTROGRAM_DIR = Path("media/spectrograms")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+SPECTROGRAM_DIR.mkdir(parents=True, exist_ok=True)
 
 MAX_DURATION_SECONDS = 1800  # 30 minutes
+RECOVERED_SUBDIR = "recovered"
 
 # In-memory storage for task status (in a real app, use Redis/DB)
 tasks = {}
@@ -40,33 +46,84 @@ def format_duration(seconds: int) -> str:
     return f"{minutes}:{secs:02d}"
 
 
-def process_audio(task_id: str, file_path: Path, model: str):
+def recovery_device() -> str:
+    """Device for the restoration models, independent of how Demucs picks its
+    own device — driven by the same USE_GPU env var used at image build time
+    (see backend/Dockerfile / docker-compose.*.yml)."""
+    return "cuda" if os.getenv("USE_GPU", "false").lower() == "true" else "cpu"
+
+
+def set_progress(task_id: str, step: str, step_index: int, step_total: int, current_stem: str = None):
+    tasks[task_id]["step"] = step
+    tasks[task_id]["step_index"] = step_index
+    tasks[task_id]["step_total"] = step_total
+    if current_stem is not None:
+        tasks[task_id]["current_stem"] = current_stem
+
+
+def process_audio(task_id: str, file_path: Path, model: str, recover: bool = False, recovery_model: str = DEFAULT_MODEL):
     tasks[task_id]["status"] = "processing"
+    tasks[task_id]["recover"] = recover
+    tasks[task_id]["recovery_model"] = recovery_model
+
+    # Step budget: 1 separation step, plus 1 step per stem when recovering.
+    # Stem count isn't known until Demucs finishes, so it's set to a
+    # provisional total of 1 here and corrected once stems are known.
+    set_progress(task_id, "separating", 0, 1)
 
     shifts = int(os.getenv("DEMUCS_SHIFTS", 0))
 
-    # Demucs command
-    # -n: Model selection
-    # --out: Output directory
-    cmd = ["demucs", "-n", model, "--out", str(OUTPUT_DIR), str(file_path)]
-
-    if shifts > 0:
-        cmd.extend(["--shifts", str(shifts)])
-
     try:
-        # Check if GPU is enabled via env var (passed to docker)
-        # Demucs automatically uses GPU if available and pytorch is configured
-        process = subprocess.run(cmd, capture_output=True, text=True)
-
-        if process.returncode == 0:
-            tasks[task_id]["status"] = "completed"
-        else:
-            print(f"Error processing {task_id}: {process.stderr}")
+        # Separation (Demucs family or BS-Roformer — see separate.py).
+        # Demucs auto-uses GPU if available and PyTorch is configured;
+        # BS-Roformer auto-detects CUDA the same way.
+        try:
+            separate_audio(file_path, OUTPUT_DIR, model, shifts, recovery_device())
+        except SeparationError as e:
+            print(f"Error processing {task_id}: {e}")
             tasks[task_id]["status"] = "failed"
+            tasks[task_id]["error"] = "Separation failed"
+            return
+
+        if not recover:
+            tasks[task_id]["status"] = "completed"
+            return
+
+        # --- Recovery stage ---
+        demucs_out_dir = OUTPUT_DIR / model / task_id
+        stems = sorted(demucs_out_dir.glob("*.wav"))
+
+        if not stems:
+            tasks[task_id]["status"] = "completed"
+            return
+
+        device = recovery_device()
+        recovered_dir = demucs_out_dir / RECOVERED_SUBDIR
+        recovered_dir.mkdir(parents=True, exist_ok=True)
+
+        set_progress(task_id, "restoring", 0, len(stems))
+        tasks[task_id]["status"] = "restoring"
+
+        for i, stem_path in enumerate(stems):
+            set_progress(task_id, "restoring", i, len(stems), current_stem=stem_path.stem)
+            out_path = recovered_dir / stem_path.name
+            try:
+                restore_stem(stem_path, out_path, recovery_model, device)
+            except RestoreError as e:
+                # Keep the original (split-only) stems intact; surface the
+                # restoration failure without discarding the split result.
+                print(f"Recovery failed for {task_id}/{stem_path.name}: {e}")
+                tasks[task_id]["status"] = "failed"
+                tasks[task_id]["error"] = f"Recovery failed on '{stem_path.stem}': {e}"
+                return
+
+        set_progress(task_id, "restoring", len(stems), len(stems))
+        tasks[task_id]["status"] = "completed"
 
     except Exception as e:
         print(f"Exception for {task_id}: {e}")
         tasks[task_id]["status"] = "failed"
+        tasks[task_id]["error"] = str(e)
 
 
 def download_youtube_audio(task_id: str, url: str):
@@ -109,8 +166,13 @@ def download_youtube_audio(task_id: str, url: str):
 async def upload_audio(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    model: str = Form("htdemucs")
+    model: str = Form("htdemucs"),
+    recover: bool = Form(False),
+    recovery_model: str = Form(DEFAULT_MODEL),
 ):
+    if recover and recovery_model.lower() not in SUPPORTED_MODELS:
+        raise HTTPException(status_code=400, detail=f"Unknown recovery_model '{recovery_model}'")
+
     task_id = str(uuid.uuid4())
     file_ext = Path(file.filename).suffix
     saved_filename = f"{task_id}{file_ext}"
@@ -121,9 +183,11 @@ async def upload_audio(
 
     tasks[task_id] = {
         "status": "queued",
-        "model": model
+        "model": model,
+        "recover": recover,
+        "recovery_model": recovery_model,
     }
-    background_tasks.add_task(process_audio, task_id, file_path, model)
+    background_tasks.add_task(process_audio, task_id, file_path, model, recover, recovery_model)
 
     return {"task_id": task_id}
 
@@ -167,12 +231,19 @@ async def youtube_download(
     background_tasks: BackgroundTasks,
     url: str = Form(...),
     model: str = Form("htdemucs"),
+    recover: bool = Form(False),
+    recovery_model: str = Form(DEFAULT_MODEL),
 ):
     """Start downloading audio from a YouTube URL in the background."""
+    if recover and recovery_model.lower() not in SUPPORTED_MODELS:
+        raise HTTPException(status_code=400, detail=f"Unknown recovery_model '{recovery_model}'")
+
     task_id = str(uuid.uuid4())
     tasks[task_id] = {
         "status": "downloading",
         "model": model,
+        "recover": recover,
+        "recovery_model": recovery_model,
     }
     background_tasks.add_task(download_youtube_audio, task_id, url)
     return {"task_id": task_id}
@@ -189,8 +260,10 @@ async def youtube_confirm(task_id: str, background_tasks: BackgroundTasks):
 
     file_path = Path(task_info["file_path"])
     model = task_info["model"]
+    recover = task_info.get("recover", False)
+    recovery_model = task_info.get("recovery_model", DEFAULT_MODEL)
     tasks[task_id]["status"] = "queued"
-    background_tasks.add_task(process_audio, task_id, file_path, model)
+    background_tasks.add_task(process_audio, task_id, file_path, model, recover, recovery_model)
     return {"status": "confirmed", "task_id": task_id}
 
 
@@ -200,7 +273,7 @@ async def youtube_preview(task_id: str):
     task_info = tasks.get(task_id)
     if not task_info:
         raise HTTPException(status_code=404, detail="Task not found")
-    if task_info["status"] not in ("downloaded", "queued", "processing", "completed"):
+    if task_info["status"] not in ("downloaded", "queued", "processing", "restoring", "completed"):
         raise HTTPException(status_code=400, detail="Audio not ready for preview")
 
     file_path = task_info.get("file_path")
@@ -216,15 +289,21 @@ async def get_status(task_id: str):
     if not task_info:
         raise HTTPException(status_code=404, detail="Task not found")
     response = {"status": task_info["status"]}
-    for key in ("error", "title", "thumbnail", "duration", "duration_formatted"):
+    for key in (
+        "error", "title", "thumbnail", "duration", "duration_formatted",
+        "step", "step_index", "step_total", "current_stem",
+        "recover", "recovery_model",
+    ):
         if key in task_info:
             response[key] = task_info[key]
     return response
 
+
 @app.get("/result/{task_id}")
 async def get_result(task_id: str):
     """
-    Returns list of available tracks for a completed task.
+    Returns list of available tracks (and recovered variants, if any) for a
+    completed task.
     """
     task_info = tasks.get(task_id)
     if not task_info or task_info["status"] != "completed":
@@ -239,22 +318,66 @@ async def get_result(task_id: str):
         return {"error": "Output directory not found"}
 
     tracks = [f.name for f in demucs_out_dir.glob("*.wav")]
-    return {"tracks": tracks}
 
-@app.get("/download/{task_id}/{track_name}")
-async def download_track(task_id: str, track_name: str):
+    recovered_dir = demucs_out_dir / RECOVERED_SUBDIR
+    recovered_tracks = [f.name for f in recovered_dir.glob("*.wav")] if recovered_dir.exists() else []
+
+    return {
+        "tracks": tracks,
+        "recovered_tracks": recovered_tracks,
+        "recovered": len(recovered_tracks) > 0,
+        "recovery_model": task_info.get("recovery_model"),
+    }
+
+
+def _resolve_track_path(task_id: str, track_name: str, variant: str) -> Path:
     task_info = tasks.get(task_id)
     if not task_info:
         raise HTTPException(status_code=404, detail="Task not found")
 
     model = task_info["model"]
     demucs_out_dir = OUTPUT_DIR / model / task_id
-    file_path = demucs_out_dir / track_name
+
+    if variant == "recovered":
+        file_path = demucs_out_dir / RECOVERED_SUBDIR / track_name
+    else:
+        file_path = demucs_out_dir / track_name
 
     if not file_path.exists():
-         raise HTTPException(status_code=404, detail="Track not found")
+        raise HTTPException(status_code=404, detail="Track not found")
 
+    return file_path
+
+
+@app.get("/download/{task_id}/{track_name}")
+async def download_track(task_id: str, track_name: str, variant: str = "original"):
+    file_path = _resolve_track_path(task_id, track_name, variant)
     return FileResponse(file_path)
+
+
+@app.get("/spectrogram/{task_id}/{track_name}")
+async def get_spectrogram(task_id: str, track_name: str, variant: str = "original"):
+    """Render (and cache) a spectrogram PNG for a stem, so the UI can show
+    the recovered high-frequency content instead of just claiming it exists."""
+    file_path = _resolve_track_path(task_id, track_name, variant)
+
+    cache_dir = SPECTROGRAM_DIR / task_id / variant
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    png_path = cache_dir / f"{Path(track_name).stem}.png"
+
+    if not png_path.exists():
+        cmd = [
+            "ffmpeg", "-y", "-v", "error",
+            "-i", str(file_path),
+            "-lavfi", "showspectrumpic=s=800x400:legend=1",
+            str(png_path),
+        ]
+        process = subprocess.run(cmd, capture_output=True, text=True)
+        if process.returncode != 0 or not png_path.exists():
+            raise HTTPException(status_code=500, detail="Failed to generate spectrogram")
+
+    return FileResponse(png_path, media_type="image/png")
+
 
 if __name__ == "__main__":
     import uvicorn

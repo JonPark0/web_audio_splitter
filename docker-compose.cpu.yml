@@ -12,6 +12,9 @@ services:
     environment:
       - USE_GPU=${USE_GPU:-false}
       - DEMUCS_SHIFTS=${DEMUCS_SHIFTS:-0}
+      - AUDIOSR_DDIM_STEPS=${AUDIOSR_DDIM_STEPS:-50}
+      - AUDIOSR_GUIDANCE_SCALE=${AUDIOSR_GUIDANCE_SCALE:-3.5}
+      - AUDIOSR_MODEL_NAME=${AUDIOSR_MODEL_NAME:-basic}
 
   frontend:
     build: ./frontend
