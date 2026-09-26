@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { FiPlay, FiPause } from 'react-icons/fi';
 import TrackRow from './TrackRow';
 import TextButton from './TextButton';
+import useWaveZoom from './useWaveZoom';
 
 export default function Mixer({ taskId, tracks, recoveredTracks }) {
   const [isPlaying, setIsPlaying] = useState(false);
@@ -12,7 +13,12 @@ export default function Mixer({ taskId, tracks, recoveredTracks }) {
   const [soloed, setSoloed] = useState({});
 
   const surfers = useRef({});
+  const playingRef = useRef(false);
+  // Stop function of the track currently playing its extract selection, if
+  // any. Selection playback and mixer playback are mutually exclusive.
+  const selectionStop = useRef(null);
   const recoveredSet = new Set(recoveredTracks || []);
+  const zoom = useWaveZoom(surfers);
 
   useEffect(() => {
     if (readyCount > 0 && readyCount === tracks.length) setIsReady(true);
@@ -20,10 +26,17 @@ export default function Mixer({ taskId, tracks, recoveredTracks }) {
 
   const anySoloed = Object.values(soloed).some(Boolean);
 
+  const setPlaying = (playing) => {
+    playingRef.current = playing;
+    setIsPlaying(playing);
+  };
+
   const togglePlay = () => {
     if (!isReady) return;
     const playing = !isPlaying;
-    setIsPlaying(playing);
+    // Ends the selection loop and re-aligns every stem at its start first.
+    if (playing) selectionStop.current?.();
+    setPlaying(playing);
     Object.values(surfers.current).forEach((ws) => (playing ? ws.play() : ws.pause()));
   };
 
@@ -34,6 +47,15 @@ export default function Mixer({ taskId, tracks, recoveredTracks }) {
       if (ws.getDuration()) ws.seekTo(progress);
     });
   }, []);
+  // A click on any waveform seeks every stem; it also ends a playing
+  // selection (the click picks a new position, so no rewind to its start).
+  const handleInteraction = useCallback(
+    (progress) => {
+      selectionStop.current?.({ rewind: false });
+      handleSeek(progress);
+    },
+    [handleSeek]
+  );
   const handleVolumeChange = useCallback((t, v) => setVolumes((s) => ({ ...s, [t]: v })), []);
   const handleToggleMute = useCallback((t) => setMuted((s) => ({ ...s, [t]: !s[t] })), []);
   const handleToggleSolo = useCallback((t) => setSoloed((s) => ({ ...s, [t]: !s[t] })), []);
@@ -43,11 +65,27 @@ export default function Mixer({ taskId, tracks, recoveredTracks }) {
   // can differ by a few ms (resampled recoveries), so the rest are paused
   // rather than left to finish on their own.
   const handleFinish = useCallback(() => {
+    playingRef.current = false;
     setIsPlaying(false);
     Object.values(surfers.current).forEach((ws) => {
       ws.pause();
       ws.seekTo(0);
     });
+  }, []);
+
+  // A track is about to play its selection: pause the mixer and stop any
+  // other track's selection, then remember how to stop this one.
+  const handleSelectionStart = useCallback((stop) => {
+    if (selectionStop.current && selectionStop.current !== stop) selectionStop.current();
+    if (playingRef.current) {
+      playingRef.current = false;
+      setIsPlaying(false);
+      Object.values(surfers.current).forEach((ws) => ws.pause());
+    }
+    selectionStop.current = stop;
+  }, []);
+  const handleSelectionEnd = useCallback((stop) => {
+    if (selectionStop.current === stop) selectionStop.current = null;
   }, []);
 
   return (
@@ -63,9 +101,16 @@ export default function Mixer({ taskId, tracks, recoveredTracks }) {
             <span>{isPlaying ? 'Pause' : 'Play'}</span>
           </span>
         </TextButton>
-        {!isReady && (
+        {!isReady ? (
           <p className="m-0 text-caption text-muted" role="status">
             Loading waveforms... ({readyCount}/{tracks.length})
+          </p>
+        ) : (
+          <p className="m-0 flex items-baseline gap-4 text-caption text-muted">
+            <span>Ctrl/⌘ + wheel over a waveform to zoom</span>
+            <TextButton muted onClick={zoom.fit} disabled={!zoom.zoomed} title="Zoom out to show whole tracks">
+              Fit
+            </TextButton>
           </p>
         )}
       </div>
@@ -88,6 +133,12 @@ export default function Mixer({ taskId, tracks, recoveredTracks }) {
             onReady={handleReady}
             onFinish={handleFinish}
             onSeek={handleSeek}
+            onInteraction={handleInteraction}
+            onSelectionStart={handleSelectionStart}
+            onSelectionEnd={handleSelectionEnd}
+            onWheelZoom={zoom.zoomWithWheel}
+            onWaveScroll={zoom.syncScroll}
+            onSurferReady={zoom.adopt}
           />
         ))}
       </div>

@@ -36,6 +36,10 @@ function App() {
   const [ytMeta, setYtMeta] = useState(null);
   const [result, setResult] = useState(null);
   const [recoveryState, setRecoveryState] = useState({ recover: false, recoveryModel: 'apollo' });
+  // Settings of the job on screen, when known (RecentJobs rows and retries
+  // carry them; /status and /result don't report the separation model), so
+  // "Retry with other settings" can pre-select them.
+  const [taskMeta, setTaskMeta] = useState(null);
 
   // Processing takes a while, so fetch the result chunk in the background
   // then; by the time it's needed it's cached and Suspense never shows.
@@ -43,17 +47,23 @@ function App() {
     if (step === 'processing') loadResultScreen().catch(() => {});
   }, [step]);
 
-  const openResult = (id, res) => {
+  const openResult = (id, res, task) => {
     setTaskId(id);
     setResult(res);
+    setTaskMeta(task ? { taskId: id, model: task.model } : null);
     setStep('result');
   };
 
+  // Used for running jobs reopened from RecentJobs and for freshly started
+  // retries (RecentJobs, ResultScreen, ProcessingScreen).
   const openProcessing = (task) => {
     setTaskId(task.task_id);
-    setRecoveryState({ recover: task.recover, recoveryModel: task.recovery_model });
+    setRecoveryState({ recover: !!task.recover, recoveryModel: task.recovery_model || 'apollo' });
+    setTaskMeta(task.model ? { taskId: task.task_id, model: task.model } : null);
     setStep('processing');
   };
+
+  const knownModel = taskMeta?.taskId === taskId ? taskMeta.model : undefined;
 
   const wide = mode !== 'split' || step === 'result';
 
@@ -122,15 +132,24 @@ function App() {
               )}
               {step === 'processing' && (
                 <ProcessingScreen
+                  key={taskId}
                   taskId={taskId}
                   recoveryState={recoveryState}
+                  model={knownModel}
                   setStep={setStep}
                   setResult={setResult}
+                  onRetried={openProcessing}
                 />
               )}
               {step === 'result' && (
                 <Suspense fallback={null}>
-                  <ResultScreen taskId={taskId} result={result} setStep={setStep} />
+                  <ResultScreen
+                    taskId={taskId}
+                    result={result}
+                    model={knownModel}
+                    setStep={setStep}
+                    onRetried={openProcessing}
+                  />
                 </Suspense>
               )}
             </>

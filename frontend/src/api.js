@@ -64,6 +64,23 @@ export function getTasks(limit = 20) {
   return axios.get(`${API_BASE}/tasks`, { params: { limit } });
 }
 
+// Re-run a finished (or failed) job's source audio with other settings. The
+// original job and its stems are kept; the 201 response carries the NEW
+// task id: { task_id }.
+export function retryTask(taskId, { model, recover, recoveryModel }) {
+  return axios.post(`${API_BASE}/tasks/${taskId}/retry`, {
+    model,
+    recover,
+    recovery_model: recoveryModel,
+  });
+}
+
+// Remove a job's uploaded audio, stems, restored stems and spectrograms.
+// Library samples cut from it survive (they're copies). 409 while running.
+export function deleteTask(taskId) {
+  return axios.delete(`${API_BASE}/tasks/${taskId}`);
+}
+
 // Cut [startSec, endSec) out of one stem into a new library sample.
 export function createSample({ taskId, track, variant, startSec, endSec, name }) {
   return axios.post(`${API_BASE}/samples`, {

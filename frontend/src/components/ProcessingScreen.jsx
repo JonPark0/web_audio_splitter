@@ -4,10 +4,16 @@ import ProgressStages from './ProgressStages';
 import ErrorBanner from './ErrorBanner';
 import Split from './Split';
 import TextButton from './TextButton';
+import RetryPanel from './RetryPanel';
+import useTaskModel from './useTaskModel';
 
-export default function ProcessingScreen({ taskId, recoveryState, setStep, setResult }) {
+export default function ProcessingScreen({ taskId, recoveryState, model, setStep, setResult, onRetried }) {
   const [statusData, setStatusData] = useState({ status: 'queued' });
   const [error, setError] = useState('');
+  const [retrying, setRetrying] = useState(false);
+  // A failed separation can be re-run from the same audio with other settings.
+  const failed = statusData.status === 'failed';
+  const jobModel = useTaskModel(taskId, model, retrying);
 
   useEffect(() => {
     // Self-scheduling poll: the next request is only queued once the previous
@@ -65,9 +71,33 @@ export default function ProcessingScreen({ taskId, recoveryState, setStep, setRe
         {error && (
           <div className="flex flex-col items-center gap-4 md:items-start">
             <ErrorBanner message={error} />
-            <TextButton onClick={() => setStep('upload')} className="text-h3">
-              Start Over
-            </TextButton>
+            <div className="flex flex-wrap items-baseline gap-x-8 gap-y-3 max-md:justify-center">
+              <TextButton onClick={() => setStep('upload')} className="text-h3">
+                Start Over
+              </TextButton>
+              {failed && onRetried && (
+                <TextButton
+                  muted
+                  current={retrying}
+                  aria-expanded={retrying}
+                  onClick={() => setRetrying((r) => !r)}
+                  title="Run this job again with a different model or restoration"
+                >
+                  Retry with other settings
+                </TextButton>
+              )}
+            </div>
+            {failed && retrying && (
+              <RetryPanel
+                className="w-full border-t border-line pt-6"
+                taskId={taskId}
+                initialModel={jobModel}
+                initialRecover={statusData.recover ?? recoveryState?.recover}
+                initialRecoveryModel={statusData.recovery_model ?? recoveryState?.recoveryModel}
+                onStarted={onRetried}
+                onCancel={() => setRetrying(false)}
+              />
+            )}
           </div>
         )}
       </div>
