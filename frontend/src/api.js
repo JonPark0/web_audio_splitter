@@ -60,6 +60,22 @@ export function isTaskGone(err) {
   return err?.response?.status === 404;
 }
 
+export function getTasks(limit = 20) {
+  return axios.get(`${API_BASE}/tasks`, { params: { limit } });
+}
+
+// Cut [startSec, endSec) out of one stem into a new library sample.
+export function createSample({ taskId, track, variant, startSec, endSec, name }) {
+  return axios.post(`${API_BASE}/samples`, {
+    task_id: taskId,
+    track,
+    variant,
+    start_sec: startSec,
+    end_sec: endSec,
+    name,
+  });
+}
+
 export function getResult(taskId) {
   return axios.get(`${API_BASE}/result/${taskId}`);
 }

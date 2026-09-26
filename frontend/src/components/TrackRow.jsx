@@ -1,14 +1,17 @@
 import React, { memo, useEffect, useRef, useState } from 'react';
 import WaveSurfer from 'wavesurfer.js';
+import RegionsPlugin from 'wavesurfer.js/dist/plugins/regions.esm.js';
 import { FiDownload, FiVolume2, FiVolumeX } from 'react-icons/fi';
 import { trackUrl } from '../api';
 import ABToggle from './ABToggle';
+import ExtractPanel from './ExtractPanel';
 import SpectrogramView from './SpectrogramView';
 import TextButton from './TextButton';
 
 // Monochrome waveform: unplayed in grey, played portion + cursor in ink.
 const WAVE_COLOR = '#b4b4b0';
 const PROGRESS_COLOR = '#141414';
+const REGION_COLOR = 'rgba(20, 20, 20, 0.12)';
 
 // Memoized so dragging one row's volume slider (Mixer state change) doesn't
 // re-render every other row; Mixer keeps the callback props stable.
@@ -30,8 +33,13 @@ export default memo(function TrackRow({
 }) {
   const containerRef = useRef(null);
   const wsRef = useRef(null);
+  const regionsRef = useRef(null);
+  const regionRef = useRef(null);
   const hasInitialized = useRef(false);
   const [variant, setVariant] = useState('original');
+  const [isReady, setIsReady] = useState(false);
+  const [extracting, setExtracting] = useState(false);
+  const [selection, setSelection] = useState(null);
   const name = trackName.replace('.wav', '');
 
   const audible = anySoloed ? soloed : !muted;
@@ -55,6 +63,7 @@ export default memo(function TrackRow({
       fillParent: true,
       interact: true,
     });
+    regionsRef.current = ws.registerPlugin(RegionsPlugin.create());
 
     // Rejects (and emits 'error', logged below) if destroyed mid-load.
     ws.load(trackUrl(taskId, trackName, 'original')).catch(() => {});
@@ -64,6 +73,7 @@ export default memo(function TrackRow({
       surfers.current[trackName] = ws;
       if (!hasInitialized.current) {
         hasInitialized.current = true;
+        setIsReady(true);
         onReady();
       }
     });
@@ -115,6 +125,37 @@ export default memo(function TrackRow({
     return unsubscribe;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [variant]);
+
+  // Extract mode: dragging on the waveform draws a single selection region.
+  // Click-to-seek is switched off meanwhile, since it would fire (and seek
+  // every track) on the same drag gesture.
+  useEffect(() => {
+    const ws = wsRef.current;
+    const regions = regionsRef.current;
+    if (!extracting || !ws || !regions) return;
+
+    ws.setOptions({ interact: false });
+    const disableDrag = regions.enableDragSelection({ color: REGION_COLOR });
+    const track = (region) => {
+      regionRef.current = region;
+      setSelection({ start: region.start, end: region.end });
+    };
+    const unsubCreated = regions.on('region-created', (region) => {
+      regions.getRegions().forEach((r) => r !== region && r.remove());
+      track(region);
+    });
+    const unsubUpdated = regions.on('region-updated', track);
+
+    return () => {
+      disableDrag();
+      unsubCreated();
+      unsubUpdated();
+      regions.clearRegions();
+      regionRef.current = null;
+      setSelection(null);
+      ws.setOptions({ interact: true });
+    };
+  }, [extracting]);
 
   // Keep audible volume in sync with the slider + mute/solo state.
   useEffect(() => {
@@ -173,7 +214,17 @@ export default memo(function TrackRow({
         */}
         <div className="relative min-w-0 flex-1" ref={containerRef} />
 
-        <div className="flex shrink-0 items-center justify-center md:w-28 md:justify-end">
+        <div className="flex shrink-0 items-center justify-center gap-5 md:w-28 md:flex-col md:items-end md:justify-center md:gap-3">
+          <TextButton
+            muted
+            current={extracting}
+            aria-pressed={extracting}
+            disabled={!isReady}
+            onClick={() => setExtracting((x) => !x)}
+            title="Select a region of this track and save it as a sample"
+          >
+            Extract
+          </TextButton>
           <TextButton as="a" href={trackUrl(taskId, trackName, variant)} download label="Download" title="Download track">
             <span className="inline-flex items-center gap-2">
               <FiDownload className="icon" strokeWidth={1.5} aria-hidden="true" />
@@ -182,6 +233,17 @@ export default memo(function TrackRow({
           </TextButton>
         </div>
       </div>
+
+      {extracting && (
+        <ExtractPanel
+          taskId={taskId}
+          trackName={trackName}
+          variant={variant}
+          selection={selection}
+          onPreview={() => regionRef.current?.play(true)}
+          onCancel={() => setExtracting(false)}
+        />
+      )}
 
       <SpectrogramView taskId={taskId} trackName={trackName} hasRecovered={hasRecovered} />
     </div>

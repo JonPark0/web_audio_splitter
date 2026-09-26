@@ -2,12 +2,19 @@ import React, { Suspense, lazy, useEffect, useState } from 'react';
 import UploadScreen from './components/UploadScreen';
 import YouTubeConfirmScreen from './components/YouTubeConfirmScreen';
 import ProcessingScreen from './components/ProcessingScreen';
+import RecentJobs from './components/RecentJobs';
 import TextButton from './components/TextButton';
 
 // The result screen pulls in the mixer + wavesurfer.js, which the upload flow
 // never needs, so it ships as its own chunk (prefetched while processing).
 const loadResultScreen = () => import('./components/ResultScreen');
 const ResultScreen = lazy(loadResultScreen);
+const LibraryScreen = lazy(() => import('./components/library/LibraryScreen'));
+
+const MODES = [
+  { key: 'split', label: 'Split' },
+  { key: 'library', label: 'Library' },
+];
 
 const STEPS = [
   { key: 'upload', label: 'Upload' },
@@ -19,6 +26,9 @@ const STEPS = [
 const REPO_URL = 'https://github.com/JonPark0/web_audio_splitter';
 
 function App() {
+  // Top-level area; the Split flow keeps its own step state while the user
+  // visits the Library, so switching back resumes where they left off.
+  const [mode, setMode] = useState('split');
   const [step, setStep] = useState('upload'); // upload, youtube_confirm, processing, result
   const [taskId, setTaskId] = useState(null);
   const [ytMeta, setYtMeta] = useState(null);
@@ -31,51 +41,91 @@ function App() {
     if (step === 'processing') loadResultScreen().catch(() => {});
   }, [step]);
 
+  const openResult = (id, res) => {
+    setTaskId(id);
+    setResult(res);
+    setStep('result');
+  };
+
+  const openProcessing = (task) => {
+    setTaskId(task.task_id);
+    setRecoveryState({ recover: task.recover, recoveryModel: task.recovery_model });
+    setStep('processing');
+  };
+
+  const wide = mode === 'library' || step === 'result';
+
   return (
     <div className="flex min-h-screen flex-col">
-      <header className="mx-auto flex w-full max-w-content flex-none items-baseline justify-between gap-8 px-edge pb-6 pt-8 max-md:justify-center">
+      <header className="mx-auto flex w-full max-w-content flex-none flex-wrap items-baseline justify-between gap-x-8 gap-y-4 px-edge pb-6 pt-8 max-md:justify-center">
         <div className="flex flex-col items-start max-md:items-center">
           <span className="font-brand text-h3 uppercase leading-none tracking-[-0.01em]">Audio Splitter</span>
           <span className="mt-1 text-caption text-muted">Split &amp; Recover</span>
         </div>
-        <nav aria-label="Steps" className="flex gap-5 max-md:hidden">
-          {STEPS.map((s) => (
-            <span
-              key={s.key}
-              aria-current={s.key === step ? 'step' : undefined}
-              className={s.key === step ? 'text-ink [font-variation-settings:"wght"_400]' : 'text-muted'}
+        <nav aria-label="Sections" className="flex gap-6 text-h4">
+          {MODES.map((m) => (
+            <TextButton
+              key={m.key}
+              muted
+              current={m.key === mode}
+              aria-current={m.key === mode ? 'page' : undefined}
+              onClick={() => setMode(m.key)}
             >
-              {s.label}
-            </span>
+              {m.label}
+            </TextButton>
           ))}
         </nav>
       </header>
 
       <main className="w-full flex-[1_0_auto] pt-4">
-        <div className={`mx-auto w-full px-edge ${step === 'result' ? 'max-w-wide' : 'max-w-content'}`}>
-          {step === 'upload' && (
-            <UploadScreen
-              setStep={setStep}
-              setTaskId={setTaskId}
-              setYtMeta={setYtMeta}
-              setRecoveryState={setRecoveryState}
-            />
-          )}
-          {step === 'youtube_confirm' && (
-            <YouTubeConfirmScreen taskId={taskId} ytMeta={ytMeta} setStep={setStep} />
-          )}
-          {step === 'processing' && (
-            <ProcessingScreen
-              taskId={taskId}
-              recoveryState={recoveryState}
-              setStep={setStep}
-              setResult={setResult}
-            />
-          )}
-          {step === 'result' && (
+        <div className={`mx-auto w-full px-edge ${wide ? 'max-w-wide' : 'max-w-content'}`}>
+          {mode === 'library' && (
             <Suspense fallback={null}>
-              <ResultScreen taskId={taskId} result={result} setStep={setStep} />
+              <LibraryScreen />
             </Suspense>
+          )}
+
+          {mode === 'split' && (
+            <>
+              <nav aria-label="Steps" className="mb-2 flex gap-5 text-caption max-md:hidden">
+                {STEPS.map((s) => (
+                  <span
+                    key={s.key}
+                    aria-current={s.key === step ? 'step' : undefined}
+                    className={s.key === step ? 'text-ink [font-variation-settings:"wght"_400]' : 'text-muted'}
+                  >
+                    {s.label}
+                  </span>
+                ))}
+              </nav>
+              {step === 'upload' && (
+                <>
+                  <UploadScreen
+                    setStep={setStep}
+                    setTaskId={setTaskId}
+                    setYtMeta={setYtMeta}
+                    setRecoveryState={setRecoveryState}
+                  />
+                  <RecentJobs onOpenResult={openResult} onOpenProcessing={openProcessing} />
+                </>
+              )}
+              {step === 'youtube_confirm' && (
+                <YouTubeConfirmScreen taskId={taskId} ytMeta={ytMeta} setStep={setStep} />
+              )}
+              {step === 'processing' && (
+                <ProcessingScreen
+                  taskId={taskId}
+                  recoveryState={recoveryState}
+                  setStep={setStep}
+                  setResult={setResult}
+                />
+              )}
+              {step === 'result' && (
+                <Suspense fallback={null}>
+                  <ResultScreen taskId={taskId} result={result} setStep={setStep} />
+                </Suspense>
+              )}
+            </>
           )}
         </div>
       </main>
