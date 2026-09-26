@@ -10,26 +10,39 @@ export default function ProcessingScreen({ taskId, recoveryState, setStep, setRe
   const [error, setError] = useState('');
 
   useEffect(() => {
-    const interval = setInterval(async () => {
+    // Self-scheduling poll: the next request is only queued once the previous
+    // one settles, so slow responses never overlap (and a tick can't fire a
+    // duplicate getResult while the first one is still in flight).
+    let cancelled = false;
+    let timer;
+
+    const poll = async () => {
       try {
         const res = await getStatus(taskId);
+        if (cancelled) return;
         setStatusData(res.data);
 
         if (res.data.status === 'completed') {
           const resultRes = await getResult(taskId);
+          if (cancelled) return;
           setResult(resultRes.data);
           setStep('result');
-          clearInterval(interval);
+          return;
         } else if (res.data.status === 'failed') {
           setError(res.data.error || 'Processing failed.');
-          clearInterval(interval);
+          return;
         }
       } catch (e) {
         console.error(e);
       }
-    }, 2000);
+      if (!cancelled) timer = setTimeout(poll, 2000);
+    };
+    timer = setTimeout(poll, 2000);
 
-    return () => clearInterval(interval);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [taskId]);
 
   return (
