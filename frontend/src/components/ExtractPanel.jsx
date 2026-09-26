@@ -11,9 +11,20 @@ export function formatClock(seconds) {
 /**
  * Shown under a track while it's in extract mode: the selected region's
  * bounds, a name, and save-to-library. The region itself lives on the
- * track's waveform (TrackRow owns the wavesurfer Regions plugin).
+ * track's waveform (TrackRow owns the wavesurfer Regions plugin, and the
+ * selection playback these controls drive).
  */
-export default function ExtractPanel({ taskId, trackName, variant, selection, onPreview, onCancel }) {
+export default function ExtractPanel({
+  taskId,
+  trackName,
+  variant,
+  selection,
+  playing,
+  loop,
+  onTogglePlay,
+  onToggleLoop,
+  onCancel,
+}) {
   const base = trackName.replace('.wav', '');
   const [name, setName] = useState('');
   const [saving, setSaving] = useState(false);
@@ -78,8 +89,24 @@ export default function ExtractPanel({ taskId, trackName, variant, selection, on
         )}
       </div>
       <div className="flex shrink-0 items-baseline gap-5">
-        <TextButton muted onClick={onPreview} disabled={!selection}>
-          Preview
+        <TextButton
+          muted
+          current={playing}
+          aria-pressed={playing}
+          onClick={onTogglePlay}
+          disabled={!selection}
+          title="Play this track from the selection start to its end"
+        >
+          {playing ? 'Stop' : 'Play selection'}
+        </TextButton>
+        <TextButton
+          muted
+          current={loop}
+          aria-pressed={loop}
+          onClick={onToggleLoop}
+          title="Repeat the selection until stopped"
+        >
+          Loop
         </TextButton>
         <TextButton onClick={save} disabled={!selection || saving}>
           {saving ? 'Saving...' : 'Save sample'}
