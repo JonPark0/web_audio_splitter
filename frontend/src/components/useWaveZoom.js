@@ -107,7 +107,7 @@ export default function useWaveZoom(surfers) {
   // A track finished (re)loading: give it the shared zoom + scroll.
   const adopt = useCallback((ws) => {
     if (levelRef.current && ws.getDecodedData()) ws.zoom(levelRef.current);
-    if (scrollRef.current) ws.setScroll(scrollRef.current);
+    ws.setScroll(scrollRef.current);
   }, []);
 
   const fit = useCallback(() => {
