@@ -7,13 +7,15 @@ import Playhead from './Playhead';
 import Ruler from './Ruler';
 import { SAMPLE_MIME, sampleDrag } from './sampleDrag';
 import TrackHeader from './TrackHeader';
-import { LANE_HEIGHT, NEW_TRACK_ROW_HEIGHT, RULER_HEIGHT, beatToPx, pxToBeat, snapBeat } from './snap';
+import { LANE_HEIGHT, NEW_TRACK_ROW_HEIGHT, RULER_HEIGHT, beatToPx, clampZoom, pxToBeat, snapBeat } from './snap';
 
 const DRAG_THRESHOLD_PX = 3;
 const MIN_BARS = 32;
 const TAIL_BARS = 8;
 const MIN_CLIP_SEC = 0.05;
 const CLIP_INSET = 4; // px gap above/below a clip inside its lane
+const WHEEL_ZOOM_SPEED = 0.0015; // per wheel pixel: ~100px notch = x1.16
+const WHEEL_LINE_PX = 16; // deltaMode 1 (lines) -> pixels
 
 // Grid: bar lines stronger than beat lines, both as translucent ink.
 function gridStyle(pxPerBeat, beatsPerBar) {
@@ -46,6 +48,7 @@ export default function Timeline({
   onAddTrack,
   onMoveClips,
   onTrimClip,
+  onZoomTo,
   onDropSample,
   onSeek,
   onLoopChange,
@@ -54,7 +57,9 @@ export default function Timeline({
   const headerRef = useRef(null);
   const lanesRef = useRef(null);
   const [viewWidth, setViewWidth] = useState(0);
-  const [drag, setDrag] = useState(null); // {type:'move', ids, dBeat, dTrack} | {type:'trim', id, lengthSec}
+  // {type:'move', ids, dBeat, dTrack} | {type:'trim', id, lengthSec}
+  // | {type:'trimStart', id, startBeat, offsetSec, lengthSec}
+  const [drag, setDrag] = useState(null);
   const [dropHint, setDropHint] = useState(null); // {trackIndex, beat, beats}
 
   const { tracks, samples = {}, bpm } = project;
@@ -83,13 +88,62 @@ export default function Timeline({
   const width = beatToPx(totalBeats, pxPerBeat);
   const lanesHeight = tracks.length * LANE_HEIGHT + NEW_TRACK_ROW_HEIGHT;
 
-  // Zoom keeps the beat at the left edge in place.
+  // Zoom keeps the beat at the left edge in place - or, for a wheel zoom,
+  // the beat under the pointer (`anchor`, set by the wheel handler).
   const prevZoom = useRef(pxPerBeat);
+  const anchor = useRef(null); // {beat, clientX}
+  const pendingZoom = useRef(null); // last zoom requested, not yet rendered
   useLayoutEffect(() => {
     const el = scrollRef.current;
-    if (el && prevZoom.current !== pxPerBeat) el.scrollLeft = (el.scrollLeft * pxPerBeat) / prevZoom.current;
+    const a = anchor.current;
+    anchor.current = null;
+    pendingZoom.current = null;
+    if (el && prevZoom.current !== pxPerBeat) {
+      if (a) {
+        const lanesLeft = el.getBoundingClientRect().left + (headerRef.current?.offsetWidth || 0);
+        el.scrollLeft = beatToPx(a.beat, pxPerBeat) - (a.clientX - lanesLeft);
+      } else {
+        el.scrollLeft = (el.scrollLeft * pxPerBeat) / prevZoom.current;
+      }
+    }
     prevZoom.current = pxPerBeat;
   }, [pxPerBeat]);
+
+  // Ctrl/Cmd + wheel zooms around the pointer. Native listener: React's
+  // onWheel is passive, and the browser's page zoom must be prevented.
+  const wheel = useRef({});
+  wheel.current = { pxPerBeat, onZoomTo };
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return undefined;
+    const onWheel = (e) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        const { pxPerBeat: ppb, onZoomTo: zoomTo } = wheel.current;
+        if (!zoomTo) return;
+        const delta = e.deltaY * (e.deltaMode === 1 ? WHEEL_LINE_PX : e.deltaMode === 2 ? el.clientHeight : 1);
+        const from = pendingZoom.current ?? ppb;
+        const next = clampZoom(from * Math.exp(-delta * WHEEL_ZOOM_SPEED));
+        if (Math.abs(next - from) < 1e-6) return;
+        // Beat under the pointer, from the DOM as rendered (over the headers:
+        // the first visible beat). Repeated events before a render reuse it.
+        const lanesLeft = el.getBoundingClientRect().left + (headerRef.current?.offsetWidth || 0);
+        const clientX = Math.max(e.clientX, lanesLeft);
+        const renderPending = pendingZoom.current !== null && pendingZoom.current !== ppb;
+        if (!renderPending || !anchor.current) {
+          anchor.current = { beat: pxToBeat(el.scrollLeft + clientX - lanesLeft, ppb), clientX };
+        }
+        pendingZoom.current = next;
+        zoomTo(next);
+      } else if (e.shiftKey && e.deltaX === 0 && e.deltaY !== 0) {
+        // Browsers that don't turn Shift+wheel into horizontal scrolling.
+        e.preventDefault();
+        el.scrollLeft += e.deltaY * (e.deltaMode === 1 ? WHEEL_LINE_PX : 1);
+      }
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
 
   const pointAt = useCallback(
     (clientX, clientY) => {
@@ -114,7 +168,7 @@ export default function Timeline({
     const trackIndex = p.tracks.findIndex((t) => t.clips.some((c) => c.id === clip.id));
     const wasSelected = sel.includes(clip.id);
     let ids;
-    if (mode === 'trim') ids = wasSelected && !e.shiftKey ? sel : e.shiftKey ? [...new Set([...sel, clip.id])] : [clip.id];
+    if (mode !== 'move') ids = wasSelected && !e.shiftKey ? sel : e.shiftKey ? [...new Set([...sel, clip.id])] : [clip.id];
     else if (e.shiftKey) ids = wasSelected ? sel : [...sel, clip.id];
     else ids = wasSelected ? sel : [clip.id];
     live.current.onSelectClips(ids, p.tracks[trackIndex]?.id);
@@ -144,6 +198,24 @@ export default function Timeline({
         const dBeat = Math.max(snapped - clip.start_beat, -minStart);
         const dTrack = Math.min(Math.max(Math.round(dy / LANE_HEIGHT), -minTrack), p.tracks.length - 1 - maxTrack);
         result = { type: 'move', ids: idSet, dBeat, dTrack };
+      } else if (mode === 'trimStart') {
+        if (!sample) return;
+        // Left edge: the right edge stays put; start, offset and length move
+        // together. Clamp the beat delta once, then derive the source delta
+        // from it, so the two can never disagree.
+        const spbRate = secondsPerBeat(p.bpm) * clipRate(clip, sample, p.bpm); // source seconds per beat
+        const minD = Math.max(-clip.offset_sec / spbRate, -clip.start_beat);
+        const maxD = Math.max(0, (clip.length_sec - MIN_CLIP_SEC) / spbRate);
+        const snapped = snapBeat(clip.start_beat + pxToBeat(dx, ppb), snap);
+        const dBeat = Math.min(Math.max(snapped - clip.start_beat, minD), maxD);
+        const srcDelta = dBeat * spbRate;
+        result = {
+          type: 'trimStart',
+          id: clip.id,
+          startBeat: clip.start_beat + dBeat,
+          offsetSec: Math.max(0, clip.offset_sec + srcDelta),
+          lengthSec: clip.length_sec - srcDelta,
+        };
       } else {
         if (!sample) return;
         const rate = clipRate(clip, sample, p.bpm);
@@ -179,7 +251,13 @@ export default function Timeline({
           }))
         );
       } else if (result.type === 'trim' && result.lengthSec !== clip.length_sec) {
-        live.current.onTrimClip(clip.id, result.lengthSec);
+        live.current.onTrimClip(clip.id, { length_sec: result.lengthSec });
+      } else if (result.type === 'trimStart' && result.startBeat !== clip.start_beat) {
+        live.current.onTrimClip(clip.id, {
+          start_beat: result.startBeat,
+          offset_sec: result.offsetSec,
+          length_sec: result.lengthSec,
+        });
       }
     };
     const onUp = () => finish(true);
@@ -243,12 +321,18 @@ export default function Timeline({
       let start = clip.start_beat;
       let index = ti;
       let lengthSec = clip.length_sec;
+      let offsetSec = clip.offset_sec;
       let dragging = false;
       if (drag?.type === 'move' && drag.ids.has(clip.id)) {
         start += drag.dBeat;
         index += drag.dTrack;
         dragging = true;
       } else if (drag?.type === 'trim' && drag.id === clip.id) {
+        lengthSec = drag.lengthSec;
+        dragging = true;
+      } else if (drag?.type === 'trimStart' && drag.id === clip.id) {
+        start = drag.startBeat;
+        offsetSec = drag.offsetSec;
         lengthSec = drag.lengthSec;
         dragging = true;
       }
@@ -262,6 +346,7 @@ export default function Timeline({
           top={index * LANE_HEIGHT + CLIP_INSET}
           width={beatToPx(beats, pxPerBeat)}
           height={clipHeight}
+          offsetSec={offsetSec}
           lengthSec={lengthSec}
           selected={selectedSet.has(clip.id)}
           dimmed={dimmed}

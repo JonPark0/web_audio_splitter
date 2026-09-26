@@ -25,7 +25,42 @@ function SaveIndicator({ status, error, onRetry }) {
   );
 }
 
-/** Project picker: current name (click to rename), list, new, delete, save state. */
+/**
+ * Mixdown to WAV: the whole song, or the loop region when there is one.
+ * The scope choice only appears when it's a choice.
+ */
+function ExportControl({ hasLoop, exporting, disabled, onExport }) {
+  const [scope, setScope] = useState('song');
+  const effective = hasLoop ? scope : 'song';
+  return (
+    <span className="flex items-baseline gap-2">
+      <TextButton
+        muted
+        onClick={() => onExport(effective)}
+        disabled={disabled || exporting}
+        aria-busy={exporting}
+        label="Export WAV"
+        title="Render a 24-bit / 48 kHz stereo WAV of the mix"
+      >
+        {exporting ? 'Rendering…' : 'Export WAV'}
+      </TextButton>
+      {hasLoop && (
+        <select
+          value={effective}
+          onChange={(e) => setScope(e.target.value)}
+          disabled={exporting}
+          aria-label="Export range"
+          className="ainput w-28 !pb-0.5 text-caption"
+        >
+          <option value="song">Whole song</option>
+          <option value="loop">Loop region</option>
+        </select>
+      )}
+    </span>
+  );
+}
+
+/** Project picker: current name (click to rename), list, new, export, delete, save state. */
 export default function ProjectBar({
   projects,
   project,
@@ -38,6 +73,8 @@ export default function ProjectBar({
   onDelete,
   onRetrySave,
   onShowList,
+  exporting,
+  onExport,
 }) {
   const [listOpen, setListOpen] = useState(false);
 
@@ -85,6 +122,14 @@ export default function ProjectBar({
                 <span>New project</span>
               </span>
             </TextButton>
+            {project && (
+              <ExportControl
+                hasLoop={project.loop?.end_beat > project.loop?.start_beat}
+                exporting={exporting}
+                disabled={busy}
+                onExport={onExport}
+              />
+            )}
             {project && (
               <ConfirmAction label="Delete" question="Delete this project?" disabled={busy} onConfirm={onDelete} />
             )}

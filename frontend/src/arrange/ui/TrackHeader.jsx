@@ -17,7 +17,8 @@ function formatPan(pan) {
 export default memo(function TrackHeader({ track, audible, selected, onSelect, onUpdate, onDelete }) {
   const [asking, setAsking] = useState(false);
   const clipCount = track.clips.length;
-  const set = (patch) => onUpdate(track.id, patch);
+  // `coalesce` groups a slider scrub into one undo step.
+  const set = (patch, coalesce) => onUpdate(track.id, patch, coalesce);
 
   const requestDelete = () => {
     if (clipCount === 0) onDelete(track.id);
@@ -89,7 +90,7 @@ export default memo(function TrackHeader({ track, audible, selected, onSelect, o
               max="1.5"
               step="0.01"
               value={track.volume}
-              onChange={(e) => set({ volume: parseFloat(e.target.value) })}
+              onChange={(e) => set({ volume: parseFloat(e.target.value) }, `volume:${track.id}`)}
               onDoubleClick={() => set({ volume: 1 })}
               className="slider min-w-0"
               aria-label={`${track.name} volume`}
@@ -104,7 +105,7 @@ export default memo(function TrackHeader({ track, audible, selected, onSelect, o
               max="1"
               step="0.01"
               value={track.pan}
-              onChange={(e) => set({ pan: parseFloat(e.target.value) })}
+              onChange={(e) => set({ pan: parseFloat(e.target.value) }, `pan:${track.id}`)}
               onDoubleClick={() => set({ pan: 0 })}
               className="slider min-w-0"
               aria-label={`${track.name} pan`}

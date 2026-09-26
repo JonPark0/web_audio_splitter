@@ -7,7 +7,8 @@ const TRIM_HANDLE_PX = 7;
 /**
  * One clip block. Pure presentation: position/size come from the Timeline
  * (which already applied any drag preview), and pointer-downs are reported
- * up with the grabbed part ('move' body or 'trim' right edge).
+ * up with the grabbed part ('move' body, 'trimStart' left edge, 'trim'
+ * right edge).
  */
 export default memo(function ClipView({
   clip,
@@ -16,6 +17,7 @@ export default memo(function ClipView({
   top,
   width,
   height,
+  offsetSec,
   lengthSec,
   selected,
   dimmed,
@@ -54,13 +56,24 @@ export default memo(function ClipView({
         <ClipWaveform
           engine={engine}
           sampleId={clip.sample_id}
-          offsetSec={clip.offset_sec}
+          offsetSec={offsetSec ?? clip.offset_sec}
           lengthSec={lengthSec}
           width={width}
           height={height - (showLabel ? LABEL_HEIGHT + 2 : 4) - 4}
         />
       </div>
-      {/* Right-edge trim handle */}
+      {/* Edge trim handles (left only when the clip is wide enough to still grab its body) */}
+      {width >= TRIM_HANDLE_PX * 3 && (
+        <div
+          aria-hidden="true"
+          onPointerDown={(e) => {
+            e.stopPropagation();
+            onClipPointerDown(e, clip, 'trimStart');
+          }}
+          className="absolute inset-y-0 left-0 cursor-ew-resize hover:bg-ink/20"
+          style={{ width: TRIM_HANDLE_PX }}
+        />
+      )}
       <div
         aria-hidden="true"
         onPointerDown={(e) => {

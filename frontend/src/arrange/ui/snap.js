@@ -3,6 +3,22 @@
 
 export const ZOOM_LEVELS = [8, 12, 16, 24, 32, 48, 64, 96]; // pixels per beat
 export const DEFAULT_ZOOM = 24;
+export const MIN_ZOOM = ZOOM_LEVELS[0];
+export const MAX_ZOOM = ZOOM_LEVELS[ZOOM_LEVELS.length - 1];
+
+export function clampZoom(z) {
+  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
+}
+
+/**
+ * Zoom buttons step through ZOOM_LEVELS; wheel zoom is continuous, so step
+ * to the next level strictly above (dir > 0) or below (dir < 0) the current one.
+ */
+export function stepZoom(z, dir) {
+  const eps = 1e-6;
+  if (dir > 0) return ZOOM_LEVELS.find((l) => l > z + eps) ?? MAX_ZOOM;
+  return [...ZOOM_LEVELS].reverse().find((l) => l < z - eps) ?? MIN_ZOOM;
+}
 
 export const LANE_HEIGHT = 88; // px, one track row (header and lane alike)
 export const RULER_HEIGHT = 28;

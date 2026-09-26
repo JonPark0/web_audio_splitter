@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { FiMinus, FiPlay, FiPlus, FiSquare } from 'react-icons/fi';
+import { FiMinus, FiPlay, FiPlus, FiRotateCcw, FiRotateCw, FiSquare } from 'react-icons/fi';
 import TextButton from '../../components/TextButton';
 import { MAX_BPM, MIN_BPM } from '../project';
 import { useClockListener } from './playheadClock';
-import { SNAP_OPTIONS, ZOOM_LEVELS, formatPosition } from './snap';
+import { MAX_ZOOM, MIN_ZOOM, SNAP_OPTIONS, formatPosition } from './snap';
 
 /** bars.beats.16ths readout, written straight to the DOM from the clock. */
 function PositionReadout({ clock, beatsPerBar }) {
@@ -88,7 +88,7 @@ function BpmInput({ bpm, onCommit }) {
   );
 }
 
-/** Transport and view controls: play/stop, position, tempo, loop, click, snap, zoom. */
+/** Transport and view controls: play/stop, position, tempo, loop, click, undo/redo, snap, zoom. */
 export default function TransportBar({
   clock,
   playing,
@@ -99,6 +99,10 @@ export default function TransportBar({
   metronome,
   snap,
   zoom,
+  canUndo,
+  canRedo,
+  onUndo,
+  onRedo,
   onTogglePlay,
   onBpmCommit,
   onToggleLoop,
@@ -106,8 +110,6 @@ export default function TransportBar({
   onSnapChange,
   onZoom,
 }) {
-  const zoomIndex = ZOOM_LEVELS.indexOf(zoom);
-
   return (
     <div className="flex flex-wrap items-center gap-x-7 gap-y-3 border-t border-line pt-3">
       <div className="flex items-center gap-4">
@@ -140,6 +142,29 @@ export default function TransportBar({
         </TextButton>
       </div>
 
+      <div className="flex items-center gap-3">
+        <TextButton
+          muted
+          label=""
+          onClick={onUndo}
+          disabled={!canUndo}
+          aria-label="Undo"
+          title="Undo (Ctrl/Cmd+Z)"
+        >
+          <FiRotateCcw className="icon" strokeWidth={1.5} aria-hidden="true" />
+        </TextButton>
+        <TextButton
+          muted
+          label=""
+          onClick={onRedo}
+          disabled={!canRedo}
+          aria-label="Redo"
+          title="Redo (Ctrl/Cmd+Shift+Z or Ctrl+Y)"
+        >
+          <FiRotateCw className="icon" strokeWidth={1.5} aria-hidden="true" />
+        </TextButton>
+      </div>
+
       <label className="flex items-baseline gap-2">
         <span className="text-caption text-muted">Snap</span>
         <select value={snap} onChange={(e) => onSnapChange(e.target.value)} className="ainput w-24 !pb-0.5" aria-label="Snap">
@@ -157,9 +182,9 @@ export default function TransportBar({
           muted
           label=""
           onClick={() => onZoom(-1)}
-          disabled={zoomIndex <= 0}
+          disabled={zoom <= MIN_ZOOM}
           aria-label="Zoom out"
-          title="Zoom out"
+          title="Zoom out (Ctrl/Cmd+wheel over the timeline)"
         >
           <FiMinus className="icon" strokeWidth={1.5} aria-hidden="true" />
         </TextButton>
@@ -167,7 +192,7 @@ export default function TransportBar({
           muted
           label=""
           onClick={() => onZoom(1)}
-          disabled={zoomIndex >= ZOOM_LEVELS.length - 1}
+          disabled={zoom >= MAX_ZOOM}
           aria-label="Zoom in"
           title="Zoom in"
         >

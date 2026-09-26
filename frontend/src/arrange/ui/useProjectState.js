@@ -3,6 +3,7 @@ import { saveProject } from '../projectsApi';
 import { errorMessage } from '../../samplesApi';
 
 const SAVE_DEBOUNCE_MS = 800;
+const HISTORY_LIMIT = 100;
 
 // Only the fields the project model embeds (project.js ProjectSample).
 export function toProjectSample(s) {
@@ -79,24 +80,107 @@ function applyEdit(project, action) {
       );
     }
 
+    case 'batch': // { actions: [...] } - several edits as ONE undo step
+      return action.actions.reduce(applyEdit, project);
+
     default:
       return project;
   }
 }
 
-function reducer(state, action) {
+// The fields a patch-style edit may set; used to spot no-op edits (same
+// value again) so they neither bump `rev` nor add an undo step.
+function patchChanges(target, patch) {
+  return Object.keys(patch).some((k) => target?.[k] !== patch[k]);
+}
+
+function isNoop(project, action) {
   switch (action.type) {
-    case 'load': // a different project (or none); clean, never saved by itself
-      return { project: action.project, rev: state.rev + 1, loadedRev: state.rev + 1 };
+    case 'setMeta':
+      return !Object.keys(action.patch).some((k) =>
+        k === 'loop' ? JSON.stringify(project.loop) !== JSON.stringify(action.patch.loop) : project[k] !== action.patch[k]
+      );
+    case 'updateTrack':
+      return !patchChanges(project.tracks.find((t) => t.id === action.trackId), action.patch);
+    case 'updateClip': {
+      for (const t of project.tracks) {
+        const c = t.clips.find((x) => x.id === action.clipId);
+        if (c) return !patchChanges(c, action.patch);
+      }
+      return true;
+    }
+    case 'batch':
+      return action.actions.every((a) => isNoop(project, a));
+    default:
+      return false;
+  }
+}
+
+/**
+ * Undo restores the document, but keeps the current `samples` (a lookup
+ * cache the server fills: a redone clip still needs its sample) and the
+ * server-managed timestamps.
+ */
+function restore(snapshot, current) {
+  return {
+    ...snapshot,
+    samples: { ...(snapshot.samples || {}), ...(current.samples || {}) },
+    updated_at: current.updated_at ?? snapshot.updated_at,
+  };
+}
+
+const EMPTY = [];
+
+export function reducer(state, action) {
+  switch (action.type) {
+    case 'load': // a different project (or none); clean, never saved by itself; history starts over
+      return { project: action.project, rev: state.rev + 1, loadedRev: state.rev + 1, past: EMPTY, future: EMPTY, gesture: null };
     case 'serverSync': // save response, only applied when nothing newer happened
       return { ...state, project: action.project };
     case 'mergeSamples': // stale save response: keep local edits, take its samples
       if (!state.project || state.project.id !== action.projectId) return state;
       return { ...state, project: { ...state.project, samples: { ...action.samples, ...state.project.samples } } };
+    case 'sealHistory': // a continuous gesture (slider scrub) ended
+      return state.gesture === null ? state : { ...state, gesture: null };
+    case 'undo': {
+      if (!state.project || !state.past.length) return state;
+      const prev = state.past[state.past.length - 1];
+      return {
+        ...state,
+        project: restore(prev, state.project),
+        rev: state.rev + 1,
+        past: state.past.slice(0, -1),
+        future: [state.project, ...state.future].slice(0, HISTORY_LIMIT),
+        gesture: null,
+      };
+    }
+    case 'redo': {
+      if (!state.project || !state.future.length) return state;
+      const [next, ...rest] = state.future;
+      return {
+        ...state,
+        project: restore(next, state.project),
+        rev: state.rev + 1,
+        past: [...state.past, state.project].slice(-HISTORY_LIMIT),
+        future: rest,
+        gesture: null,
+      };
+    }
     default: {
-      if (!state.project) return state;
+      if (!state.project || isNoop(state.project, action)) return state;
       const project = applyEdit(state.project, action);
-      return project === state.project ? state : { ...state, project, rev: state.rev + 1 };
+      if (project === state.project) return state;
+      // Edits tagged with the same `coalesce` key (one slider being scrubbed)
+      // share the undo step the first of them opened, until sealed.
+      const continuing = !!action.coalesce && state.gesture === action.coalesce;
+      return {
+        ...state,
+        project,
+        rev: state.rev + 1,
+        past: continuing ? state.past : [...state.past, state.project].slice(-HISTORY_LIMIT),
+        future: continuing ? state.future : EMPTY,
+        gesture: action.coalesce || null,
+      };
     }
   }
 }
@@ -109,9 +193,22 @@ function reducer(state, action) {
  * so typing or dragging during a save is never clobbered. Saves are
  * serialised - a second one waits for the first - so the server always
  * sees them in order.
+ *
+ * History: every edit pushes the previous document onto `past` (capped);
+ * undo/redo swap documents and bump `rev` like any edit, so they reach the
+ * engine and autosave the same way. Continuous gestures coalesce: tag the
+ * actions with `coalesce: key`; `sealHistory` (dispatched by the screen on
+ * pointerup/keyup) closes the step.
  */
 export default function useProjectState() {
-  const [state, dispatch] = useReducer(reducer, { project: null, rev: 0, loadedRev: 0 });
+  const [state, dispatch] = useReducer(reducer, {
+    project: null,
+    rev: 0,
+    loadedRev: 0,
+    past: EMPTY,
+    future: EMPTY,
+    gesture: null,
+  });
   const [saveStatus, setSaveStatus] = useState('idle'); // idle | pending | saving | saved | error
   const [saveError, setSaveError] = useState(null);
 
@@ -195,5 +292,20 @@ export default function useProjectState() {
     if (inFlightRef.current) await inFlightRef.current.catch(() => {});
   }, []);
 
-  return { project: state.project, dispatch, saveStatus, saveError, saveNow, load, discard };
+  const undo = useCallback(() => dispatch({ type: 'undo' }), []);
+  const redo = useCallback(() => dispatch({ type: 'redo' }), []);
+
+  return {
+    project: state.project,
+    dispatch,
+    saveStatus,
+    saveError,
+    saveNow,
+    load,
+    discard,
+    undo,
+    redo,
+    canUndo: !!state.project && state.past.length > 0,
+    canRedo: !!state.project && state.future.length > 0,
+  };
 }

@@ -3,15 +3,16 @@ import { FiPlus } from 'react-icons/fi';
 import ErrorBanner from '../../components/ErrorBanner';
 import TextButton from '../../components/TextButton';
 import { errorMessage } from '../../samplesApi';
-import { clipEndBeat, makeClip, makeTrack, newId } from '../project';
+import { clipEndBeat, makeClip, makeTrack, newId, projectEndBeat } from '../project';
 import { createProject, deleteProject, getProject, listProjects } from '../projectsApi';
+import { encodeWav } from '../wav';
 import ClipInspector from './ClipInspector';
 import ProjectBar from './ProjectBar';
 import SampleBrowser from './SampleBrowser';
 import Timeline from './Timeline';
 import TransportBar from './TransportBar';
 import { usePositionClock } from './playheadClock';
-import { DEFAULT_SNAP, DEFAULT_ZOOM, ZOOM_LEVELS, snapBeat, snapStep } from './snap';
+import { DEFAULT_SNAP, DEFAULT_ZOOM, clampZoom, snapBeat, snapStep, stepZoom } from './snap';
 import useEngine, { engineCall, engineTry, useErrorReporter } from './useEngine';
 import useProjectState from './useProjectState';
 
@@ -63,12 +64,42 @@ function isTyping(target) {
   return target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
 }
 
+// Narrower, for undo/redo: only fields with their own text undo keep the
+// shortcut (a focused slider or checkbox doesn't).
+const NON_TEXT_INPUTS = new Set(['range', 'checkbox', 'radio', 'button', 'submit', 'reset', 'color', 'file']);
+function isTextEntry(target) {
+  if (!target || !(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable || target.tagName === 'TEXTAREA') return true;
+  return target.tagName === 'INPUT' && !NON_TEXT_INPUTS.has(target.type);
+}
+
+const EXPORT_SAMPLE_RATE = 48000;
+
+function wavFileName(name) {
+  // eslint-disable-next-line no-control-regex
+  const base = (name || '').replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').replace(/[. ]+$/, '').trim();
+  return `${base || 'mixdown'}.wav`;
+}
+
+function downloadBlob(blob, fileName) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // Revoking synchronously can cancel the download in some browsers.
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
 /**
  * Arrange: place library samples on tracks at one project tempo, play them
  * through the arrangement engine, autosave to the backend.
  */
 export default function ArrangeScreen() {
-  const { project, dispatch, saveStatus, saveError, saveNow, load, discard } = useProjectState();
+  const { project, dispatch, saveStatus, saveError, saveNow, load, discard, undo, redo, canUndo, canRedo } =
+    useProjectState();
   const { error, report, clear } = useErrorReporter();
 
   const [projects, setProjects] = useState([]);
@@ -82,6 +113,7 @@ export default function ArrangeScreen() {
   const [snap, setSnap] = useState(DEFAULT_SNAP);
   const [selection, setSelection] = useState([]);
   const [selectedTrackId, setSelectedTrackId] = useState(null);
+  const [exporting, setExporting] = useState(false);
 
   const playingRef = useRef(false);
   const userStopRef = useRef(false); // distinguishes Stop from the engine ending by itself
@@ -301,13 +333,19 @@ export default function ArrangeScreen() {
     }
   }, [discard, openLoaded, openProject, project, projects, report]);
 
-  const handleRename = useCallback(
-    (name) => {
-      dispatch({ type: 'setMeta', patch: { name } });
-      setProjects((prev) => prev.map((p) => (p.id === project?.id ? { ...p, name } : p)));
-    },
-    [dispatch, project?.id]
-  );
+  const handleRename = useCallback((name) => dispatch({ type: 'setMeta', patch: { name } }), [dispatch]);
+
+  // The list follows the open project's name (rename, and its undo/redo).
+  const openId = project?.id;
+  const openName = project?.name;
+  useEffect(() => {
+    if (!openId) return;
+    setProjects((prev) =>
+      prev.some((p) => p.id === openId && p.name !== openName)
+        ? prev.map((p) => (p.id === openId ? { ...p, name: openName } : p))
+        : prev
+    );
+  }, [openId, openName]);
 
   // ---------------- edits ----------------
   const setBpm = useCallback((bpm) => dispatch({ type: 'setMeta', patch: { bpm } }), [dispatch]);
@@ -332,7 +370,11 @@ export default function ArrangeScreen() {
     setSelectedTrackId(track.id);
   }, [dispatch, project]);
 
-  const updateTrack = useCallback((id, patch) => dispatch({ type: 'updateTrack', trackId: id, patch }), [dispatch]);
+  // `coalesce` (slider scrubs) merges a gesture into one undo step; see useProjectState.
+  const updateTrack = useCallback(
+    (id, patch, coalesce) => dispatch({ type: 'updateTrack', trackId: id, patch, coalesce }),
+    [dispatch]
+  );
   const deleteTrack = useCallback((id) => dispatch({ type: 'deleteTrack', trackId: id }), [dispatch]);
 
   const selectClips = useCallback((ids, trackOf) => {
@@ -341,8 +383,18 @@ export default function ArrangeScreen() {
   }, []);
 
   const moveClips = useCallback((moves) => dispatch({ type: 'moveClips', moves }), [dispatch]);
-  const updateClip = useCallback((clipId, patch) => dispatch({ type: 'updateClip', clipId, patch }), [dispatch]);
-  const trimClip = useCallback((clipId, length_sec) => updateClip(clipId, { length_sec }), [updateClip]);
+  const updateClip = useCallback(
+    (clipId, patch, coalesce) => dispatch({ type: 'updateClip', clipId, patch, coalesce }),
+    [dispatch]
+  );
+  /** Several clip patches as one undo step: [{clipId, patch}]. */
+  const updateClips = useCallback(
+    (items) =>
+      dispatch({ type: 'batch', actions: items.map(({ clipId, patch }) => ({ type: 'updateClip', clipId, patch })) }),
+    [dispatch]
+  );
+  /** Edge trims: {length_sec} (right) or {start_beat, offset_sec, length_sec} (left). */
+  const trimClip = useCallback((clipId, patch) => updateClip(clipId, patch), [updateClip]);
 
   /** Put a library sample on a track (null = a new track) at `beat`. */
   const placeSample = useCallback(
@@ -350,12 +402,14 @@ export default function ArrangeScreen() {
       if (!project || !sample) return;
       const clip = makeClip(sample, Math.max(0, beat));
       let tid = targetTrackId;
+      const actions = [];
       if (!tid) {
         const track = makeTrack(`Track ${project.tracks.length + 1}`);
-        dispatch({ type: 'addTrack', track });
+        actions.push({ type: 'addTrack', track });
         tid = track.id;
       }
-      dispatch({ type: 'insertClips', items: [{ trackId: tid, clip }], samples: [sample] });
+      actions.push({ type: 'insertClips', items: [{ trackId: tid, clip }], samples: [sample] });
+      dispatch({ type: 'batch', actions }); // one undo step, new track included
       setSelection([clip.id]);
       setSelectedTrackId(tid);
     },
@@ -389,14 +443,51 @@ export default function ArrangeScreen() {
     setSelection(items.map((x) => x.clip.id));
   }, [dispatch, project, liveSelection]);
 
+  // ---------------- mixdown ----------------
+  const exportMix = useCallback(
+    async (scope) => {
+      const p = project;
+      const e = engineRef.current;
+      if (!p || !e || exporting) return;
+      const { loop } = p;
+      const useLoop = scope === 'loop' && loop && loop.end_beat > loop.start_beat;
+      const fromBeat = useLoop ? loop.start_beat : 0;
+      const toBeat = useLoop ? loop.end_beat : projectEndBeat(p);
+      if (!(toBeat > fromBeat)) {
+        report('Nothing to export: the project has no clips.');
+        return;
+      }
+      setExporting(true);
+      try {
+        const buffer = await engineCall(() => e.renderOffline(p, { fromBeat, toBeat, sampleRate: EXPORT_SAMPLE_RATE }));
+        downloadBlob(encodeWav(buffer, { bitDepth: 24 }), wavFileName(p.name));
+      } catch (err) {
+        report(`Export failed: ${err?.message || 'could not render the mix'}`);
+      } finally {
+        setExporting(false);
+      }
+    },
+    [project, exporting, report]
+  );
+
   // ---------------- keyboard ----------------
   const keys = useRef({});
-  keys.current = { project, liveSelection, togglePlay, deleteSelected, duplicateSelected };
+  keys.current = { project, liveSelection, togglePlay, deleteSelected, duplicateSelected, undo, redo };
 
   useEffect(() => {
     const onKey = (e) => {
-      if (e.defaultPrevented || isTyping(e.target)) return;
+      if (e.defaultPrevented) return;
       const k = keys.current;
+      const key = (e.key || '').toLowerCase();
+      // Undo/redo: Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z, Ctrl+Y. Text fields keep their own undo.
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && (key === 'z' || (key === 'y' && e.ctrlKey))) {
+        if (isTextEntry(e.target) || !k.project) return;
+        e.preventDefault();
+        if (key === 'y' || e.shiftKey) k.redo();
+        else k.undo();
+        return;
+      }
+      if (isTyping(e.target)) return;
       if (!k.project) return;
       if (e.code === 'Space' || e.key === ' ') {
         if (e.repeat) return;
@@ -418,12 +509,27 @@ export default function ArrangeScreen() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  const onZoom = useCallback((dir) => {
-    setZoom((z) => {
-      const i = ZOOM_LEVELS.indexOf(z);
-      return ZOOM_LEVELS[Math.min(ZOOM_LEVELS.length - 1, Math.max(0, i + dir))] ?? DEFAULT_ZOOM;
-    });
-  }, []);
+  // A slider scrub is one undo step: releasing the pointer or key closes it.
+  // Deferred a tick, since a range input's final `change` follows mouseup.
+  useEffect(() => {
+    let timer = null;
+    const seal = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => dispatch({ type: 'sealHistory' }), 0);
+    };
+    window.addEventListener('pointerup', seal, true);
+    window.addEventListener('pointercancel', seal, true);
+    window.addEventListener('keyup', seal, true);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('pointerup', seal, true);
+      window.removeEventListener('pointercancel', seal, true);
+      window.removeEventListener('keyup', seal, true);
+    };
+  }, [dispatch]);
+
+  const onZoom = useCallback((dir) => setZoom((z) => stepZoom(z, dir)), []);
+  const onZoomTo = useCallback((z) => setZoom(clampZoom(z)), []);
 
   const retryList = async () => {
     clear();
@@ -470,6 +576,10 @@ export default function ArrangeScreen() {
           metronome={metronome}
           snap={snap}
           zoom={zoom}
+          canUndo={canUndo}
+          canRedo={canRedo}
+          onUndo={undo}
+          onRedo={redo}
           onTogglePlay={togglePlay}
           onBpmCommit={setBpm}
           onToggleLoop={toggleLoop}
@@ -494,6 +604,7 @@ export default function ArrangeScreen() {
               onAddTrack={addTrack}
               onMoveClips={moveClips}
               onTrimClip={trimClip}
+              onZoomTo={onZoomTo}
               onDropSample={placeSample}
               onSeek={seek}
               onLoopChange={setLoop}
@@ -501,7 +612,9 @@ export default function ArrangeScreen() {
             <ClipInspector
               project={project}
               selection={liveSelection}
+              loading={loading}
               onUpdateClip={updateClip}
+              onUpdateClips={updateClips}
               onDuplicate={duplicateSelected}
               onDelete={deleteSelected}
             />
@@ -528,6 +641,8 @@ export default function ArrangeScreen() {
         onDelete={handleDelete}
         onRetrySave={saveNow}
         onShowList={refreshList}
+        exporting={exporting}
+        onExport={exportMix}
       />
       <ErrorBanner message={error} onDismiss={clear} />
       {body}
