@@ -21,8 +21,8 @@ A web application to separate audio files into individual tracks (Vocals, Drums,
 - **Staged Progress:** Real progress through Separating → Restoring, not just a spinner.
 - **Sample Extraction:** Select a region on any stem's waveform (original or recovered) and save it as a sample — cut sample-accurately on the server.
 - **Sample Library:** Search, tag and preview saved samples. BPM and key are detected automatically; correct the BPM (×2 / ÷2, direct entry, tap tempo) or override the key. Your own audio files can be imported too.
-- **Job History:** Jobs are stored in PostgreSQL, so past results can be reopened after a restart.
-- **Arrangement View:** Ableton-style tracks on a bar/beat timeline — drag samples from the library onto tracks, move/trim/duplicate clips with snapping, loop a region, per-track volume/pan/mute/solo, metronome. Projects autosave to PostgreSQL.
+- **Job History:** Jobs are stored in PostgreSQL, so past results can be reopened after a restart. Any finished job can be **retried** with another separation model or recovery setting (a new job from the same source audio; the original is kept) or **deleted** together with its files.
+- **Arrangement View:** Ableton-style tracks on a bar/beat timeline — drag samples from the library onto tracks, move/duplicate clips with snapping, trim either edge, per-clip pitch shift (±24 semitones), loop a region, per-track volume/pan/mute/solo, metronome, undo/redo (Ctrl+Z / Ctrl+Shift+Z), Ctrl+wheel zoom, and **Export WAV** (whole song or loop region, 24-bit). Projects autosave to PostgreSQL.
 - **BPM Sync:** Warped clips follow the project tempo. Changing the BPM time-stretches them server-side (Rubber Band, pitch preserved) and caches the result; until a render arrives the clip plays sped up/down so the change is heard immediately.
 - **GPU Support:** Optional NVIDIA GPU acceleration via Docker.
 
@@ -74,7 +74,7 @@ Once the build is complete:
 1. **Upload:** Select an audio file (or paste a YouTube URL) on the main page. Optionally enable "Restore missing frequencies" and pick a recovery model.
 2. **Process:** Wait for the AI to process the file — the progress bar shows Separating, then Restoring if recovery is on.
 3. **Result:** Use the play button to listen to all tracks. Adjust volumes, mute/solo individual stems, toggle Original vs. Recovered per track, view each stem's spectrogram, and download the tracks you want.
-4. **Extract samples:** Click **Extract** on a track, drag across its waveform to select a region, preview it, name it and **Save sample**. The current Original/Recovered choice is what gets saved.
+4. **Extract samples:** Click **Extract** on a track, drag across its waveform to select a region, then **Play selection** (optionally **Loop**) to hear exactly that range, name it and **Save sample**. The current Original/Recovered choice is what gets saved. Hold **Ctrl** (⌘ on macOS) and scroll over any waveform to zoom in horizontally for precise selections — all stems zoom and scroll together; **Fit** resets.
 5. **Library:** Open the **Library** tab to browse samples, fix BPM/key, tag, download or delete them. Past jobs are listed under **Recent jobs** on the upload page.
 6. **Arrange:** Open the **Arrange** tab, create a project, set its BPM, and drag samples from the browser onto tracks. Clips with a known BPM are warped to the project tempo (toggle per clip); get the sample BPM right in the Library first — ×2 / ÷2 fixes most detection errors.
 
@@ -123,6 +123,7 @@ A few models came up in research (via Gemini and independently) that looked prom
 - **React 18** - UI framework
 - **Vite** - Fast build tool and dev server
 - **Tailwind CSS** - Utility-first styling / design system
+- **Palnarium design system** - Monochrome tokens (ink/muted/paper/line/wash), Exo 2 + Pretendard (Hangul) at one weight, bare-text controls
 - **WaveSurfer.js** - Audio waveform visualization
 - **Axios** - HTTP client for API requests
 - **React Icons** - Icon library
@@ -263,6 +264,7 @@ npm run dev
 | `AUDIOSR_MODEL_NAME` | `basic` | AudioSR model variant: `basic` (music/general) or `speech` |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `splitter` | Credentials for the `db` service |
 | `DATABASE_URL` | built from the above | Backend connection string (set by compose; set it yourself when running without Docker) |
+| `MEDIA_RETENTION_DAYS` | `0` | Delete jobs (uploads, stems, spectrograms) older than N days; library samples are separate copies and are kept. `0` = keep everything |
 
 ### API Endpoints
 - `POST /upload` - Upload an audio file (`file`, `model`, `recover`, `recovery_model`) → `{task_id}`
@@ -275,6 +277,8 @@ npm run dev
 - `GET /download/{task_id}/{track_name}?variant=original|recovered` - Download a stem
 - `GET /spectrogram/{task_id}/{track_name}?variant=original|recovered` - Rendered (and cached) spectrogram PNG
 - `GET /tasks?limit=` - Recent jobs, newest first
+- `POST /tasks/{task_id}/retry` - Re-run a job's source audio with other settings (JSON: `model`, `recover`, `recovery_model`) → `{task_id}` of the new job
+- `DELETE /tasks/{task_id}` - Delete a job and its files (`409` while running)
 - `POST /samples` - Extract a sample from a stem (JSON: `task_id`, `track`, `variant`, `start_sec`, `end_sec`, `name?`, `tags?`)
 - `POST /samples/import` - Import an audio file into the library (`file`, `name?`, `tags?`)
 - `GET /samples?q=&tag=&key=&bpm_min=&bpm_max=&sort=` - List/search samples

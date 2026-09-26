@@ -21,8 +21,8 @@ Meta Demucs AI 모델을 사용하여 오디오 파일을 개별 트랙(보컬, 
 - **단계별 진행 표시:** 단순 로딩 표시가 아닌 분리 → 복원 단계별 실제 진행률
 - **샘플 추출:** 각 stem(원본 또는 복원본)의 파형에서 구간을 선택해 샘플로 저장합니다. 서버에서 샘플 단위로 정확하게 잘라냅니다.
 - **샘플 라이브러리:** 저장한 샘플을 검색·태그·미리듣기할 수 있습니다. BPM과 키를 자동으로 분석하고, BPM은 ×2 / ÷2, 직접 입력, 탭 템포로 보정하고 키도 직접 지정할 수 있습니다. 가지고 있는 오디오 파일을 가져올 수도 있습니다.
-- **작업 기록:** 작업이 PostgreSQL에 저장되어, 재시작한 뒤에도 이전 결과를 다시 열 수 있습니다.
-- **Arrangement View:** Ableton 방식의 마디/박자 타임라인 위에 트랙을 구성합니다. 라이브러리의 샘플을 트랙에 끌어다 놓고, 스냅에 맞춰 클립을 이동·트리밍·복제하고, 구간을 반복 재생할 수 있습니다. 트랙별 볼륨/팬/음소거/솔로와 메트로놈을 지원하고, 프로젝트는 PostgreSQL에 자동 저장됩니다.
+- **작업 기록:** 작업이 PostgreSQL에 저장되어, 재시작한 뒤에도 이전 결과를 다시 열 수 있습니다. 끝난 작업은 다른 분리 모델이나 복원 설정으로 **다시 실행(Retry)**할 수 있고(같은 원본 음원으로 새 작업을 만들며 기존 작업은 유지), 파일과 함께 **삭제**할 수도 있습니다.
+- **Arrangement View:** Ableton 방식의 마디/박자 타임라인 위에 트랙을 구성합니다. 라이브러리의 샘플을 트랙에 끌어다 놓고, 스냅에 맞춰 클립을 이동·복제하고, 양쪽 끝을 자르고, 클립별로 음정을 ±24반음 조절할 수 있습니다. 구간 반복, 트랙별 볼륨/팬/음소거/솔로, 메트로놈, 실행 취소/다시 실행(Ctrl+Z / Ctrl+Shift+Z), Ctrl+휠 확대, **Export WAV**(전체 곡 또는 반복 구간, 24-bit)를 지원하고, 프로젝트는 PostgreSQL에 자동 저장됩니다.
 - **BPM Sync:** warp가 켜진 클립은 프로젝트 템포를 따릅니다. BPM을 바꾸면 서버에서 음정을 유지한 채 time-stretch(Rubber Band)하고 결과를 캐시합니다. 렌더링이 끝나기 전에는 속도만 바꿔 재생해서 변경을 바로 들을 수 있습니다.
 - **GPU 지원:** Docker를 통한 NVIDIA GPU 가속 지원(선택사항)
 
@@ -74,7 +74,7 @@ docker compose -f docker-compose.gpu.yml up --build
 1. **업로드:** 메인 페이지에서 오디오 파일을 선택하거나 YouTube URL을 붙여넣으세요. 필요하면 "주파수 복원" 옵션을 켜고 복원 모델을 선택하세요.
 2. **처리:** AI가 파일을 처리할 때까지 기다립니다 — 진행률 표시가 분리 단계, 복원이 켜져 있다면 복원 단계까지 보여줍니다.
 3. **결과:** 재생 버튼으로 모든 트랙을 들어보세요. 볼륨 조절, 트랙별 음소거/솔로, 트랙별 원본/복원본 전환, 스펙트로그램 확인, 원하는 트랙 다운로드가 가능합니다.
-4. **샘플 추출:** 트랙의 **Extract**를 누르고 파형 위를 드래그해 구간을 선택한 뒤, 미리듣고 이름을 정해 **Save sample**을 누르세요. 그 시점에 선택된 원본/복원본이 저장됩니다.
+4. **샘플 추출:** 트랙의 **Extract**를 누르고 파형 위를 드래그해 구간을 선택한 뒤, **Play selection**(필요하면 **Loop**)으로 그 구간만 정확히 들어 보고 이름을 정해 **Save sample**을 누르세요. 그 시점에 선택된 원본/복원본이 저장됩니다. 파형 위에서 **Ctrl**(macOS는 ⌘)을 누른 채 스크롤하면 좌우로 확대되어 정밀하게 선택할 수 있습니다. 모든 stem이 함께 확대·스크롤되고, **Fit**으로 되돌립니다.
 5. **라이브러리:** **Library** 탭에서 샘플을 둘러보고 BPM/키 보정, 태그 지정, 다운로드, 삭제를 할 수 있습니다. 이전 작업은 업로드 화면의 **Recent jobs**에 표시됩니다.
 6. **어레인지:** **Arrange** 탭에서 프로젝트를 만들고 BPM을 정한 뒤, 샘플 브라우저에서 샘플을 트랙으로 끌어다 놓으세요. BPM이 있는 클립은 프로젝트 템포에 맞춰 warp됩니다(클립별로 켜고 끌 수 있음). 먼저 라이브러리에서 샘플 BPM을 맞춰 두세요 — 대부분의 분석 오류는 ×2 / ÷2로 고칠 수 있습니다.
 
@@ -123,6 +123,7 @@ docker compose -f docker-compose.gpu.yml up --build
 - **React 18** - UI 프레임워크
 - **Vite** - 빠른 빌드 도구 및 개발 서버
 - **Tailwind CSS** - 유틸리티 기반 스타일링 / 디자인 시스템
+- **Palnarium 디자인 시스템** - 흑백 토큰(ink/muted/paper/line/wash), Exo 2 + Pretendard(한글) 단일 굵기, 텍스트만으로 된 컨트롤
 - **WaveSurfer.js** - 오디오 파형 시각화
 - **Axios** - API 요청을 위한 HTTP 클라이언트
 - **React Icons** - 아이콘 라이브러리
@@ -263,6 +264,7 @@ npm run dev
 | `AUDIOSR_MODEL_NAME` | `basic` | AudioSR 모델 종류: `basic`(음악/범용) 또는 `speech` |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `splitter` | `db` 서비스 접속 정보 |
 | `DATABASE_URL` | 위 값으로 구성 | 백엔드 DB 연결 문자열 (compose가 설정, Docker 없이 실행할 때는 직접 지정) |
+| `MEDIA_RETENTION_DAYS` | `0` | N일이 지난 작업(업로드, stem, 스펙트로그램)을 삭제합니다. 라이브러리 샘플은 별도 복사본이라 유지됩니다. `0` = 모두 보관 |
 
 ### API 엔드포인트
 - `POST /upload` - 오디오 파일 업로드 (`file`, `model`, `recover`, `recovery_model`) → `{task_id}`
@@ -275,6 +277,8 @@ npm run dev
 - `GET /download/{task_id}/{track_name}?variant=original|recovered` - 스템 다운로드
 - `GET /spectrogram/{task_id}/{track_name}?variant=original|recovered` - 렌더링(및 캐시)된 스펙트로그램 PNG
 - `GET /tasks?limit=` - 최근 작업 목록 (최신순)
+- `POST /tasks/{task_id}/retry` - 작업의 원본 음원을 다른 설정으로 다시 실행 (JSON: `model`, `recover`, `recovery_model`) → 새 작업의 `{task_id}`
+- `DELETE /tasks/{task_id}` - 작업과 파일 삭제 (실행 중이면 `409`)
 - `POST /samples` - stem에서 샘플 추출 (JSON: `task_id`, `track`, `variant`, `start_sec`, `end_sec`, `name?`, `tags?`)
 - `POST /samples/import` - 오디오 파일을 라이브러리로 가져오기 (`file`, `name?`, `tags?`)
 - `GET /samples?q=&tag=&key=&bpm_min=&bpm_max=&sort=` - 샘플 목록/검색
