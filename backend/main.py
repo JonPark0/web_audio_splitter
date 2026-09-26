@@ -468,6 +468,8 @@ def get_result(task_id: str):
         "recovered": len(recovered_tracks) > 0,
         "recovery_model": task_info.get("recovery_model"),
         "name": task_info.get("title") or task_info.get("source_name"),
+        "model": task_info["model"],
+        "recover": task_info.get("recover", False),
     }
 
 
