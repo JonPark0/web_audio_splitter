@@ -2,9 +2,13 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Self-hosted fonts (public/fonts, licenses in public/fonts/licenses).
-   Exo 2 is variable (wght) - it drives the link hover weight animation.
-   Anta is the wordmark only. */
+/* Palnarium monochrome system (JonPark0/palnarium client/static/styles.css).
+   Self-hosted fonts live in public/fonts, licenses in public/fonts/licenses.
+   Exo 2      - variable (wght), Latin body + display; drives the hover weight
+   Anta       - single weight, wordmark only
+   Pretendard - Light (300) + Regular (400) subsets, Hangul only
+                (unicode-range), so Korean text matches Exo 2's 300 body /
+                400 hover weights instead of falling back to a system face */
 @font-face {
   font-family: 'Exo 2';
   src: url('/fonts/exo2.woff2') format('woff2');
@@ -19,31 +23,73 @@
   font-style: normal;
   font-display: swap;
 }
+@font-face {
+  font-family: 'Pretendard';
+  src: url('/fonts/pretendard-light.woff2') format('woff2');
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+1100-11FF, U+3130-318F, U+A960-A97F, U+AC00-D7A3, U+D7B0-D7FF;
+}
+@font-face {
+  font-family: 'Pretendard';
+  src: url('/fonts/pretendard.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+1100-11FF, U+3130-318F, U+A960-A97F, U+AC00-D7A3, U+D7B0-D7FF;
+}
 
 @layer base {
+  :root {
+    /* Palnarium tokens, for inline styles / canvas code that can't use the
+       Tailwind theme */
+    --ink: theme('colors.ink');
+    --muted: theme('colors.muted');
+    --paper: theme('colors.paper');
+    --line: theme('colors.line');
+    --wash: theme('colors.wash');
+    --w: 300; /* the single weight */
+    --w-hover: 400; /* hover / focus / current only */
+    --s: 8px; /* the single spacing unit */
+
+    color-scheme: light; /* one theme, light */
+    accent-color: theme('colors.ink'); /* any native control stays monochrome */
+  }
   html {
-    color-scheme: light;
     -webkit-text-size-adjust: 100%;
     /* reserve the scrollbar gutter so screens don't shift between steps */
     scrollbar-gutter: stable;
   }
   body {
-    @apply bg-paper text-ink font-sans text-p leading-body antialiased;
-    font-weight: 300;
-    font-variation-settings: 'wght' 300;
+    @apply bg-paper font-sans text-p text-ink antialiased;
+    font-weight: var(--w);
+    font-variation-settings: 'wght' var(--w);
     text-rendering: optimizeLegibility;
   }
   ::selection {
     @apply bg-ink text-paper;
   }
+  /* preflight falls back to a blue-grey #9ca3af once `gray` is gone */
+  input::placeholder,
+  textarea::placeholder {
+    color: theme('colors.muted');
+  }
+  /* One focus ring everywhere (Palnarium: 2px ink). Links/fields refine it
+     below; this catches plain buttons, clips, rows, <summary>... so the
+     browser's blue ring never shows. */
+  :focus-visible {
+    outline: 2px solid theme('colors.ink');
+    outline-offset: 2px;
+  }
 }
 
 @layer components {
-  /* Text-only link/button. Hover raises weight 300 -> 400; the hidden
-     400-weight ghost (::after, fed by data-label) keeps the box from
-     reflowing. :active presses in. */
+  /* Text-only link/button (Palnarium .link). Hover/focus raise the weight
+     300 -> 400 over 140ms; the hidden 400-weight ghost (::after, fed by
+     data-label) keeps the box from reflowing. :active presses in. */
   .link {
-    --_w: 300;
+    --_w: var(--w);
     display: inline-flex;
     flex-direction: column;
     align-items: center;
@@ -63,12 +109,14 @@
     overflow: hidden;
     visibility: hidden;
     pointer-events: none;
-    font-variation-settings: 'wght' 400;
+    font-weight: var(--w-hover);
+    font-variation-settings: 'wght' var(--w-hover);
   }
   .link:hover,
   .link:focus-visible,
   .link.is-current {
-    --_w: 400;
+    --_w: var(--w-hover);
+    font-weight: var(--w-hover); /* picks Pretendard Regular for Hangul */
   }
   .link:active {
     transform: translateY(1.5px) scale(0.985);
@@ -78,14 +126,30 @@
     outline: 2px solid theme('colors.ink');
     outline-offset: 4px;
   }
+  /* current page/section (Palnarium pager .is-current): weight + underline */
+  .link[aria-current='page'] {
+    text-decoration: underline;
+    text-underline-offset: 4px;
+    text-decoration-thickness: 1px;
+  }
+  @supports not (font-variation-settings: 'wght' 400) {
+    .link:hover,
+    .link:focus-visible {
+      text-shadow: 0.02em 0 currentColor, -0.02em 0 currentColor;
+    }
+  }
+  /* App-only: Palnarium has no disabled link. Unavailable reads as muted
+     and inert (no hover weight, no press). */
   .link:disabled,
   .link[aria-disabled='true'] {
-    --_w: 300;
+    --_w: var(--w);
+    font-weight: var(--w);
     color: theme('colors.muted');
     cursor: default;
     transform: none;
     opacity: 1;
   }
+  /* Secondary action (Palnarium .abtn--text / .abtn--danger) */
   .link--muted {
     color: theme('colors.muted');
   }
@@ -93,15 +157,59 @@
     color: theme('colors.ink');
   }
 
-  /* 1em stroked icon (Palnarium .icon) */
+  /* Non-link text that should answer hover like a link but can't carry the
+     ghost column (e.g. a truncating click-to-rename name). */
+  .weight-hover {
+    font-variation-settings: 'wght' var(--w);
+    transition: font-variation-settings 140ms ease;
+  }
+  .weight-hover:hover:not(:disabled),
+  .weight-hover:focus-visible {
+    font-weight: var(--w-hover);
+    font-variation-settings: 'wght' var(--w-hover);
+  }
+  /* Static emphasis at the hover weight (current step, open item). */
+  .weight-up {
+    font-weight: var(--w-hover);
+    font-variation-settings: 'wght' var(--w-hover);
+  }
+
+  /* Line icon (Palnarium .icon): 1em, 24-grid, 1.5 stroke, no fill,
+     unrounded caps/joins. The CSS beats react-icons' presentation
+     attributes (Feather ships round caps + stroke 2). */
   .icon {
     width: 1em;
     height: 1em;
     flex: none;
     display: inline-block;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    stroke-linecap: butt;
+    stroke-linejoin: miter;
+  }
+  /* square everywhere: Feather's square/stop glyph ships rx=2 */
+  .icon rect {
+    rx: 0;
+    ry: 0;
+  }
+  /* Icons inside a link follow its weight: 1.5 -> 2 is the same step as
+     300 -> 400, so icon-only buttons get hover feedback too. */
+  .link .icon {
+    transition: stroke-width 140ms ease;
+  }
+  .link:hover .icon,
+  .link:focus-visible .icon,
+  .link.is-current .icon {
+    stroke-width: 2;
+  }
+  .link:disabled .icon,
+  .link[aria-disabled='true'] .icon {
+    stroke-width: 1.5;
   }
 
-  /* Underlined field */
+  /* Underlined field (Palnarium .ainput): one line, `line` at rest, `ink`
+     on focus; no box, no radius, no outline. */
   .ainput {
     font: inherit;
     color: theme('colors.ink');
@@ -109,60 +217,113 @@
     border-bottom: 1px solid theme('colors.line');
     border-radius: 0;
     background: none;
-    padding: 0 0 8px;
+    padding: 0 0 var(--s);
     width: 100%;
+    appearance: none;
+    transition: border-color 140ms ease;
   }
   .ainput::placeholder {
     color: theme('colors.muted');
+    opacity: 1;
   }
   .ainput:focus {
     outline: none;
     border-bottom-color: theme('colors.ink');
   }
+  .ainput:disabled {
+    color: theme('colors.muted');
+    -webkit-text-fill-color: theme('colors.muted');
+    opacity: 1;
+    cursor: default;
+  }
+  /* strip browser chrome that isn't monochrome/square */
+  .ainput::-webkit-inner-spin-button,
+  .ainput::-webkit-outer-spin-button,
+  .ainput::-webkit-search-decoration,
+  .ainput::-webkit-search-cancel-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  .ainput[type='number'] {
+    -moz-appearance: textfield;
+  }
+  .ainput:-webkit-autofill {
+    -webkit-text-fill-color: theme('colors.ink');
+    transition: background-color 600000s 0s; /* keep Chrome's autofill tint off */
+  }
   select.ainput {
-    appearance: none;
     cursor: pointer;
-    padding-right: 24px;
+    padding-right: calc(var(--s) * 3);
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23141414' stroke-width='1.5'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
     background-position: right 0 top 2px;
     background-size: 16px 16px;
   }
+  select.ainput:disabled {
+    cursor: default;
+  }
 
-  /* Volume slider: 1px line track, small ink thumb */
+  /* Range slider - app-only; Palnarium has none. Extrapolated from its
+     parts: the track is a hairline that darkens on hover/focus like a
+     field underline, the thumb is an ink dot (the carousel dot, the only
+     round shape) that grows 1.35x on hover like the landing dots. */
   .slider {
     @apply w-full cursor-pointer appearance-none bg-transparent;
-    height: 16px;
+    height: calc(var(--s) * 2);
   }
   .slider::-webkit-slider-runnable-track {
     height: 1px;
     background: theme('colors.line');
+    transition: background-color 140ms ease;
   }
   .slider::-webkit-slider-thumb {
     @apply appearance-none rounded-full bg-ink;
     width: 9px;
     height: 9px;
     margin-top: -4px;
-    transition: transform 120ms ease;
-  }
-  .slider:hover::-webkit-slider-thumb {
-    transform: scale(1.3);
+    border: 0;
+    transition: transform 160ms ease;
   }
   .slider::-moz-range-track {
     height: 1px;
     background: theme('colors.line');
+    transition: background-color 140ms ease;
   }
   .slider::-moz-range-thumb {
-    @apply rounded-full bg-ink border-0;
+    @apply rounded-full bg-ink;
     width: 9px;
     height: 9px;
+    border: 0;
+    transition: transform 160ms ease;
+  }
+  .slider:hover:not(:disabled)::-webkit-slider-runnable-track,
+  .slider:focus-visible::-webkit-slider-runnable-track {
+    background: theme('colors.ink');
+  }
+  .slider:hover:not(:disabled)::-moz-range-track,
+  .slider:focus-visible::-moz-range-track {
+    background: theme('colors.ink');
+  }
+  .slider:hover:not(:disabled)::-webkit-slider-thumb,
+  .slider:active:not(:disabled)::-webkit-slider-thumb {
+    transform: scale(1.35);
+  }
+  .slider:hover:not(:disabled)::-moz-range-thumb,
+  .slider:active:not(:disabled)::-moz-range-thumb {
+    transform: scale(1.35);
   }
   .slider:focus-visible {
     outline: 2px solid theme('colors.ink');
     outline-offset: 2px;
   }
+  /* unavailable: Palnarium's disabled carousel button opacity */
+  .slider:disabled {
+    cursor: default;
+    opacity: 0.25;
+  }
 }
 
+/* Keep the weight change, drop everything that moves (Palnarium). */
 @media (prefers-reduced-motion: reduce) {
   .link {
     transition: font-variation-settings 140ms ease;
@@ -170,7 +331,17 @@
   .link:active {
     transform: none;
   }
+  /* separate rules: an unknown pseudo-element drops the whole selector list */
+  .slider::-webkit-slider-thumb {
+    transition: none;
+  }
+  .slider::-moz-range-thumb {
+    transition: none;
+  }
+  /* a parked indeterminate bar would read as "33% done" - hide it; the
+     status line beside it still says what's happening */
   .animate-slide {
     animation: none;
+    visibility: hidden;
   }
 }

@@ -49,13 +49,14 @@ export default function NameEditor({ sample, busy, onPatch }) {
   }
 
   // Not TextButton: its centred ghost-label column would break truncation.
+  // .weight-hover gives it the link's 300 -> 400 hover without the ghost.
   return (
     <button
       type="button"
       disabled={busy}
       onClick={start}
       title="Rename"
-      className="block w-full min-w-0 cursor-text truncate border-0 bg-transparent p-0 text-left text-h4 leading-tight text-ink disabled:cursor-default"
+      className="weight-hover block w-full min-w-0 cursor-text truncate border-0 bg-transparent p-0 text-left text-h4 leading-tight text-ink disabled:cursor-default"
     >
       {sample.name}
     </button>

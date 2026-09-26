@@ -99,6 +99,8 @@ export default function UploadScreen({ setStep, setTaskId, setYtMeta, setRecover
       ? 'Fetching...'
       : 'Fetch from YouTube';
 
+  const dropLabel = file ? file.name : 'Drop an audio file';
+
   return (
     <Split title="Upload">
       <div className="flex flex-col gap-6">
@@ -111,13 +113,15 @@ export default function UploadScreen({ setStep, setTaskId, setYtMeta, setRecover
         <ErrorBanner message={error} onDismiss={() => setError('')} />
 
         {inputMode === 'file' && (
+          // Drop target without a box (Palnarium's text-only "Add New Image"
+          // upload): the words are the control. Hovering or dragging a file
+          // over it raises the weight like a link; the drag also lays down
+          // the one hover fill, wash, so the target area is visible.
           <div
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
-            className={`border border-dashed px-6 py-12 text-center transition-colors ${
-              isDragging ? 'border-ink bg-hover' : 'border-line hover:border-muted'
-            }`}
+            className={`group -mx-4 px-4 py-8 text-center transition-colors duration-140 ${isDragging ? 'bg-wash' : ''}`}
           >
             <input
               type="file"
@@ -133,19 +137,17 @@ export default function UploadScreen({ setStep, setTaskId, setYtMeta, setRecover
               htmlFor="file-upload"
               className="flex cursor-pointer flex-col items-center gap-2 peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-4 peer-focus-visible:outline-ink"
             >
-              {file ? (
-                <>
-                  <span className="break-all text-h3 leading-tight">{file.name}</span>
-                  <span className="text-caption text-muted">
-                    {(file.size / (1024 * 1024)).toFixed(1)} MB · click to choose another
-                  </span>
-                </>
-              ) : (
-                <>
-                  <span className="text-h3 leading-tight">Drop an audio file</span>
-                  <span className="text-caption text-muted">or click to browse</span>
-                </>
-              )}
+              <span
+                data-label={dropLabel}
+                className={`link max-w-full break-all text-h3 group-hover:[--_w:400] ${isDragging ? '[--_w:400]' : ''}`}
+              >
+                {dropLabel}
+              </span>
+              <span className="text-caption text-muted">
+                {file
+                  ? `${(file.size / (1024 * 1024)).toFixed(1)} MB · click to choose another`
+                  : 'or click to browse'}
+              </span>
             </label>
           </div>
         )}

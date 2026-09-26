@@ -1,9 +1,11 @@
 import React from 'react';
 
 /**
- * Word toggle (Palnarium's Published / Draft switch): options are plain words,
- * inactive ones muted, the active one in ink. Real radios underneath so it
- * stays keyboard- and screen-reader-friendly.
+ * Word toggle (Palnarium's Published / Draft switch, .atoggle): options are
+ * plain words, the chosen one in ink, the others muted - colour alone marks
+ * the choice, as on Palnarium. Unchosen words still answer hover with the
+ * link weight. Real radios underneath so it stays keyboard- and
+ * screen-reader-friendly; focus draws a 2px ink ring around the word.
  */
 export default function WordToggle({
   name,
@@ -17,14 +19,13 @@ export default function WordToggle({
   return (
     <div
       role="radiogroup"
-      className={`flex flex-wrap gap-x-5 gap-y-2 ${centerOnMobile ? 'max-md:justify-center' : ''} ${
-        disabled ? 'pointer-events-none opacity-40' : ''
-      } ${className}`}
+      aria-disabled={disabled || undefined}
+      className={`flex flex-wrap gap-x-5 gap-y-2 ${centerOnMobile ? 'max-md:justify-center' : ''} ${className}`}
     >
       {options.map((o) => {
         const checked = o.value === value;
         return (
-          <label key={o.value} className="relative cursor-pointer">
+          <label key={o.value} className={`relative ${disabled ? 'cursor-default' : 'cursor-pointer'}`}>
             <input
               type="radio"
               name={name}
@@ -36,8 +37,9 @@ export default function WordToggle({
             />
             <span
               data-label={o.label}
+              aria-disabled={disabled || undefined}
               className={`link peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-ink ${
-                checked ? 'is-current text-ink' : '!text-muted'
+                checked && !disabled ? '' : '!text-muted'
               }`}
             >
               {o.label}
