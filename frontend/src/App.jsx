@@ -10,10 +10,12 @@ import TextButton from './components/TextButton';
 const loadResultScreen = () => import('./components/ResultScreen');
 const ResultScreen = lazy(loadResultScreen);
 const LibraryScreen = lazy(() => import('./components/library/LibraryScreen'));
+const ArrangeScreen = lazy(() => import('./arrange/ui/ArrangeScreen'));
 
 const MODES = [
   { key: 'split', label: 'Split' },
   { key: 'library', label: 'Library' },
+  { key: 'arrange', label: 'Arrange' },
 ];
 
 const STEPS = [
@@ -53,7 +55,7 @@ function App() {
     setStep('processing');
   };
 
-  const wide = mode === 'library' || step === 'result';
+  const wide = mode !== 'split' || step === 'result';
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -82,6 +84,12 @@ function App() {
           {mode === 'library' && (
             <Suspense fallback={null}>
               <LibraryScreen />
+            </Suspense>
+          )}
+
+          {mode === 'arrange' && (
+            <Suspense fallback={null}>
+              <ArrangeScreen />
             </Suspense>
           )}
 

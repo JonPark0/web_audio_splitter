@@ -424,9 +424,10 @@ export function createEngine() {
   }
 
   async function getBuffer(sampleId) {
-    const sample = project?.samples[sampleId];
-    if (!sample) throw new Error('Unknown sample');
-    return load(sampleAudioUrl(sample));
+    // Doesn't require the sample to be in the current project yet: the UI's
+    // child components (clip waveforms) run their effects before the parent
+    // hands the engine the project, and the URL only needs the id.
+    return load(sampleAudioUrl(project?.samples[sampleId] ?? { id: sampleId }));
   }
 
   /**
