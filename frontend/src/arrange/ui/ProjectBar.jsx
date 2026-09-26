@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { FiChevronDown, FiChevronUp, FiPlus } from 'react-icons/fi';
 import TextButton from '../../components/TextButton';
 import ConfirmAction from './ConfirmAction';
 import InlineName from './InlineName';
@@ -15,7 +14,10 @@ const SAVE_LABELS = { pending: 'Unsaved', saving: 'Saving…', saved: 'Saved', e
 function SaveIndicator({ status, error, onRetry }) {
   return (
     <span role="status" aria-live="polite" className="flex items-baseline gap-3 text-caption text-muted">
-      <span title={status === 'error' ? error || undefined : undefined}>{SAVE_LABELS[status] || ''}</span>
+      {/* a failed save must be read to act on (Retry), so it's ink */}
+      <span title={status === 'error' ? error || undefined : undefined} className={status === 'error' ? 'text-ink' : ''}>
+        {SAVE_LABELS[status] || ''}
+      </span>
       {status === 'error' && (
         <TextButton onClick={onRetry} className="text-caption">
           Retry
@@ -50,7 +52,7 @@ function ExportControl({ hasLoop, exporting, disabled, onExport }) {
           onChange={(e) => setScope(e.target.value)}
           disabled={exporting}
           aria-label="Export range"
-          className="ainput w-28 !pb-0.5 text-caption"
+          className="ainput w-28 !pb-1 text-caption"
         >
           <option value="song">Whole song</option>
           <option value="loop">Loop region</option>
@@ -92,35 +94,25 @@ export default function ProjectBar({
               value={project.name}
               label="Project name"
               onCommit={onRename}
-              className="max-w-full text-h2 font-light md:max-w-[520px]"
-              inputClassName="text-h2 w-[min(520px,80vw)]"
+              className="max-w-full text-h2 font-light md:max-w-measure"
+              inputClassName="text-h2 w-[min(560px,80vw)]"
             />
           ) : (
             <span className="text-h2 font-light text-muted">No project</span>
           )}
           <div className="flex flex-wrap items-baseline gap-x-5 gap-y-2">
+            {/* Open state is the current weight (aria-expanded), no chevron */}
             <TextButton
               muted
               current={listOpen}
               aria-expanded={listOpen}
               onClick={toggleList}
-              label="Projects"
               disabled={!projects.length}
             >
-              <span className="inline-flex items-center gap-1.5">
-                <span>Projects</span>
-                {listOpen ? (
-                  <FiChevronUp className="icon" strokeWidth={1.5} aria-hidden="true" />
-                ) : (
-                  <FiChevronDown className="icon" strokeWidth={1.5} aria-hidden="true" />
-                )}
-              </span>
+              Projects
             </TextButton>
-            <TextButton muted onClick={onCreate} disabled={busy} label="New project">
-              <span className="inline-flex items-center gap-1.5">
-                <FiPlus className="icon" strokeWidth={1.5} aria-hidden="true" />
-                <span>New project</span>
-              </span>
+            <TextButton muted onClick={onCreate} disabled={busy}>
+              New project
             </TextButton>
             {project && (
               <ExportControl
@@ -139,11 +131,12 @@ export default function ProjectBar({
       </div>
 
       {listOpen && projects.length > 0 && (
-        <ul className="m-0 list-none border-t border-line p-0">
+        // Admin-type rows: a hairline between rows only, never capping the list.
+        <ul className="m-0 list-none divide-y divide-line p-0">
           {projects.map((p) => {
             const current = p.id === project?.id;
             return (
-              <li key={p.id} className="border-b border-line">
+              <li key={p.id}>
                 <button
                   type="button"
                   onClick={() => {
@@ -151,9 +144,9 @@ export default function ProjectBar({
                     if (!current) onOpen(p.id);
                   }}
                   aria-current={current ? 'true' : undefined}
-                  className="flex w-full flex-wrap items-baseline justify-between gap-x-6 gap-y-1 border-0 bg-transparent px-0 py-2 text-left text-ink hover:bg-hover"
+                  className="flex w-full flex-wrap items-baseline justify-between gap-x-6 gap-y-1 border-0 bg-transparent px-0 py-2 text-left text-ink transition-opacity duration-140 hover:opacity-55"
                 >
-                  <span className={`min-w-0 truncate ${current ? '[font-variation-settings:"wght"_400]' : ''}`}>
+                  <span className={`min-w-0 truncate ${current ? 'weight-up' : ''}`}>
                     {p.name}
                   </span>
                   <span className="text-caption tabular-nums text-muted">

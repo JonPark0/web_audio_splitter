@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { FiPlus } from 'react-icons/fi';
 import ErrorBanner from '../../components/ErrorBanner';
 import TextButton from '../../components/TextButton';
 import { errorMessage } from '../../samplesApi';
@@ -541,25 +540,22 @@ export default function ArrangeScreen() {
   // ---------------- render ----------------
   let body;
   if (!project) {
+    // States are one quiet sentence, no rules (Palnarium .list__empty), as
+    // in the Library; what to do next stays ink.
     body =
       listStatus === 'loading' || busy ? (
-        <p className="m-0 border-t border-line py-10 text-center text-muted">Loading…</p>
+        <p className="m-0 py-10 text-center text-muted">Loading…</p>
       ) : listStatus === 'error' ? (
-        <div className="flex flex-col items-center gap-3 border-t border-line py-12 text-center">
-          <p className="m-0 text-h4">Projects are unavailable.</p>
+        <div className="flex flex-col items-center gap-3 py-12 text-center">
+          <p className="m-0 text-muted">Projects are unavailable.</p>
           <TextButton onClick={retryList}>Retry</TextButton>
         </div>
       ) : (
-        <div className="flex flex-col items-center gap-3 border-t border-line py-12 text-center">
-          <p className="m-0 text-h4">No projects yet.</p>
-          <p className="m-0 max-w-[480px] text-muted">
-            A project lays library samples out on tracks at one tempo.
-          </p>
-          <TextButton onClick={handleCreate} disabled={busy} label="New project" className="mt-2">
-            <span className="inline-flex items-center gap-2">
-              <FiPlus className="icon" strokeWidth={1.5} aria-hidden="true" />
-              <span>New project</span>
-            </span>
+        <div className="flex flex-col items-center gap-3 py-12 text-center">
+          <p className="m-0 text-muted">No projects yet.</p>
+          <p className="m-0 max-w-measure">A project lays library samples out on tracks at one tempo.</p>
+          <TextButton onClick={handleCreate} disabled={busy} className="mt-2">
+            New project
           </TextButton>
         </div>
       );

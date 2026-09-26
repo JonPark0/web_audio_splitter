@@ -28,7 +28,7 @@ export default memo(function TrackHeader({ track, audible, selected, onSelect, o
   return (
     <div
       onPointerDown={() => onSelect(track.id)}
-      className={`flex flex-col justify-center gap-1 border-b border-line px-2 md:px-3 ${selected ? 'bg-hover' : 'bg-paper'}`}
+      className={`flex flex-col justify-center gap-1 border-b border-line px-2 md:px-3 ${selected ? 'bg-wash' : 'bg-paper'}`}
       style={{ height: LANE_HEIGHT }}
     >
       <div className="flex min-w-0 items-baseline gap-2">
@@ -68,7 +68,7 @@ export default memo(function TrackHeader({ track, audible, selected, onSelect, o
 
       {asking ? (
         <div className="flex flex-col text-caption" onKeyDown={(e) => e.key === 'Escape' && setAsking(false)}>
-          <span className="text-muted">
+          <span>
             Delete with {clipCount} {clipCount === 1 ? 'clip' : 'clips'}?
           </span>
           <span className="flex gap-3">

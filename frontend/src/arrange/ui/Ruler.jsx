@@ -83,30 +83,35 @@ export default memo(function Ruler({ pxPerBeat, beatsPerBar, totalBeats, loop, s
       ref={ref}
       onPointerDown={onPointerDown}
       title="Click to move the playhead · drag to set the loop"
-      className="relative cursor-pointer select-none border-b border-ink/60 text-caption"
-      style={{
-        height: RULER_HEIGHT,
-        touchAction: 'none',
-        // bar ticks full height, beat ticks along the bottom third
-        backgroundImage: `linear-gradient(to right, rgba(20,20,20,0.35) 1px, transparent 1px), linear-gradient(to right, rgba(20,20,20,0.18) 1px, transparent 1px)`,
-        backgroundSize: `${barPx}px 100%, ${pxPerBeat}px 33%`,
-        backgroundPosition: '0 0, 0 100%',
-        backgroundRepeat: 'repeat-x',
-      }}
+      className="relative cursor-pointer select-none border-b border-ink text-caption"
+      style={{ height: RULER_HEIGHT, touchAction: 'none' }}
     >
+      {/* Loop region: an enabled loop is the wash fill under an ink top edge;
+          a disabled one keeps only its hairline ends. */}
       {shownLoop && (
         <div
           aria-hidden="true"
-          className={`absolute inset-y-0 ${
-            shownLoop.enabled ? 'bg-ink/15' : 'border-x border-dashed border-ink/30 bg-ink/[0.04]'
-          }`}
+          className={`absolute inset-y-0 ${shownLoop.enabled ? 'border-t border-ink bg-wash' : 'border-x border-line'}`}
           style={{ left: beatToPx(shownLoop.start, pxPerBeat), width: beatToPx(shownLoop.end - shownLoop.start, pxPerBeat) }}
         />
       )}
+      {/* Ticks above the loop fill so it never hides them: bar ticks full
+          height in `line`, beat ticks along the bottom third in `wash`. */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0"
+        style={{
+          backgroundImage:
+            'linear-gradient(to right, var(--line) 1px, transparent 1px), linear-gradient(to right, var(--wash) 1px, transparent 1px)',
+          backgroundSize: `${barPx}px 100%, ${pxPerBeat}px 33%`,
+          backgroundPosition: '0 0, 0 100%',
+          backgroundRepeat: 'repeat-x',
+        }}
+      />
       {labels.map((i) => (
         <span
           key={i}
-          className="pointer-events-none absolute top-0.5 pl-1 leading-tight tabular-nums text-muted"
+          className="pointer-events-none absolute top-1 pl-1 leading-tight tabular-nums text-ink"
           style={{ left: beatToPx(i * beatsPerBar, pxPerBeat) }}
         >
           {i + 1}

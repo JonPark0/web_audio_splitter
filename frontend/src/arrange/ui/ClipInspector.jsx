@@ -79,7 +79,7 @@ function SemitoneInput({ value, onCommit }) {
         }
       }}
       aria-label="Pitch in semitones"
-      className="ainput w-12 !pb-0.5 text-center tabular-nums"
+      className="ainput w-12 !pb-1 text-center tabular-nums"
     />
   );
 }
@@ -164,8 +164,9 @@ export default function ClipInspector({ project, selection, loading = 0, onUpdat
   );
 
   if (selection.length === 0) {
+    // How to edit is read to act on, so it stays ink.
     return (
-      <p className="m-0 text-caption text-muted">
+      <p className="m-0 text-caption">
         Click a clip to select it · Shift adds · drag to move · drag its edges to trim · Space plays ·
         Ctrl/Cmd+Z undoes · Ctrl/Cmd+wheel zooms
       </p>
