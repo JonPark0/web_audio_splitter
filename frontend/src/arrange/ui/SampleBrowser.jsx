@@ -28,7 +28,7 @@ const SampleItem = memo(function SampleItem({ sample, playing, onTogglePlay, onA
         sampleDrag.current = null;
       }}
       title="Drag onto a track"
-      className="flex cursor-grab items-center gap-3 border-b border-line py-2 hover:bg-hover active:cursor-grabbing"
+      className="flex cursor-grab items-center gap-3 py-2 transition-opacity duration-140 hover:opacity-55 active:cursor-grabbing"
     >
       <TextButton
         onClick={() => onTogglePlay(sample)}
@@ -119,25 +119,28 @@ export default function SampleBrowser({ onAdd, onError }) {
       <div className="max-h-[420px] overflow-y-auto lg:max-h-[560px]">
         {status === 'loading' && <p className="m-0 py-4 text-caption text-muted">Loading…</p>}
         {status === 'error' && (
-          <p className="m-0 flex items-baseline gap-3 py-4 text-caption text-muted">
+          <p className="m-0 flex items-baseline gap-3 py-4 text-caption">
             Could not load samples.
             <TextButton onClick={fetchSamples}>Retry</TextButton>
           </p>
         )}
         {status === 'ready' && samples.length === 0 && (
-          <p className="m-0 py-4 text-caption text-muted">
-            {debouncedQ ? 'No samples match.' : 'No samples yet — extract some in Split or import them in the Library.'}
-          </p>
+          // Status muted, how to get started ink (read to act on), as in the Library.
+          <div className="flex flex-col gap-1 py-4 text-caption">
+            <p className="m-0 text-muted">{debouncedQ ? 'No samples match.' : 'No samples yet.'}</p>
+            {!debouncedQ && <p className="m-0">Extract some in Split or import them in the Library.</p>}
+          </div>
         )}
         {status === 'ready' && samples.length > 0 && (
-          <ul className="m-0 list-none border-t border-line p-0">
+          // A hairline between rows only, never capping the list.
+          <ul className="m-0 list-none divide-y divide-line p-0">
             {samples.map((s) => (
               <SampleItem key={s.id} sample={s} playing={s.id === playingId} onTogglePlay={toggle} onAdd={onAdd} />
             ))}
           </ul>
         )}
       </div>
-      <p className="m-0 text-caption text-muted max-lg:hidden">Drag a sample onto a track, or Add it at the playhead.</p>
+      <p className="m-0 text-caption max-lg:hidden">Drag a sample onto a track, or Add it at the playhead.</p>
     </section>
   );
 }

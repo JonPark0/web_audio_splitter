@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { FiPlus } from 'react-icons/fi';
 import TextButton from '../../components/TextButton';
 import { canWarp, clipDurationBeats, clipRate, isTrackAudible, projectEndBeat, secondsPerBeat } from '../project';
 import ClipView from './ClipView';
@@ -17,11 +16,11 @@ const CLIP_INSET = 4; // px gap above/below a clip inside its lane
 const WHEEL_ZOOM_SPEED = 0.0015; // per wheel pixel: ~100px notch = x1.16
 const WHEEL_LINE_PX = 16; // deltaMode 1 (lines) -> pixels
 
-// Grid: bar lines stronger than beat lines, both as translucent ink.
+// Grid in palette colours only: bar lines `line`, beat lines `wash`.
 function gridStyle(pxPerBeat, beatsPerBar) {
   return {
     backgroundImage:
-      'linear-gradient(to right, rgba(20,20,20,0.13) 1px, transparent 1px), linear-gradient(to right, rgba(20,20,20,0.05) 1px, transparent 1px)',
+      'linear-gradient(to right, var(--line) 1px, transparent 1px), linear-gradient(to right, var(--wash) 1px, transparent 1px)',
     backgroundSize: `${pxPerBeat * beatsPerBar}px 100%, ${pxPerBeat}px 100%`,
   };
 }
@@ -366,7 +365,7 @@ export default function Timeline({
         {/* Headers column, pinned while the lanes scroll under it */}
         <div ref={headerRef} className="sticky left-0 z-30 w-40 shrink-0 border-r border-line bg-paper md:w-56">
           <div
-            className="flex items-end border-b border-ink/60 px-2 pb-0.5 text-caption text-muted md:px-3"
+            className="flex items-end border-b border-ink px-2 pb-1 text-caption text-muted md:px-3"
             style={{ height: RULER_HEIGHT }}
           >
             {tracks.length} {tracks.length === 1 ? 'track' : 'tracks'}
@@ -383,11 +382,8 @@ export default function Timeline({
             />
           ))}
           <div className="flex items-center px-2 md:px-3" style={{ height: NEW_TRACK_ROW_HEIGHT }}>
-            <TextButton muted onClick={onAddTrack} label="Add track" className="text-caption">
-              <span className="inline-flex items-center gap-1.5">
-                <FiPlus className="icon" strokeWidth={1.5} aria-hidden="true" />
-                <span>Add track</span>
-              </span>
+            <TextButton muted onClick={onAddTrack} className="text-caption">
+              Add track
             </TextButton>
           </div>
         </div>
@@ -410,14 +406,14 @@ export default function Timeline({
             onDragLeave={onDragLeave}
             onDrop={onDrop}
             className="relative"
-            style={{ height: lanesHeight, ...gridStyle(pxPerBeat, beatsPerBar) }}
+            style={{ height: lanesHeight }}
           >
             {tracks.map((track, i) => (
               <div
                 key={track.id}
                 aria-hidden="true"
                 className={`pointer-events-none absolute inset-x-0 border-b border-line ${
-                  track.id === selectedTrackId ? 'bg-ink/[0.025]' : ''
+                  track.id === selectedTrackId ? 'bg-wash' : ''
                 }`}
                 style={{ top: i * LANE_HEIGHT, height: LANE_HEIGHT }}
               />
@@ -426,7 +422,7 @@ export default function Timeline({
             {loopShown && (
               <div
                 aria-hidden="true"
-                className="pointer-events-none absolute inset-y-0 bg-ink/[0.04]"
+                className="pointer-events-none absolute inset-y-0 bg-wash"
                 style={{
                   left: beatToPx(loop.start_beat, pxPerBeat),
                   width: beatToPx(loop.end_beat - loop.start_beat, pxPerBeat),
@@ -434,9 +430,16 @@ export default function Timeline({
               />
             )}
 
+            {/* Grid above the opaque lane/loop fills so they never hide it */}
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-0"
+              style={gridStyle(pxPerBeat, beatsPerBar)}
+            />
+
             {!hasClips && tracks.length > 0 && !dropHint && (
               <p
-                className="pointer-events-none absolute left-4 m-0 text-muted"
+                className="pointer-events-none absolute left-4 m-0 text-ink"
                 style={{ top: LANE_HEIGHT / 2 - 12 }}
               >
                 Drag samples from the browser onto a track.
@@ -448,7 +451,7 @@ export default function Timeline({
             {dropHint && (
               <div
                 aria-hidden="true"
-                className="pointer-events-none absolute z-20 border border-dashed border-ink bg-ink/5"
+                className="pointer-events-none absolute z-20 border border-dashed border-ink"
                 style={{
                   left: beatToPx(dropHint.beat, pxPerBeat),
                   top: dropHint.trackIndex * LANE_HEIGHT + CLIP_INSET,
@@ -459,7 +462,7 @@ export default function Timeline({
             )}
             {dropHint && dropHint.trackIndex >= tracks.length && (
               <p
-                className="pointer-events-none absolute m-0 whitespace-nowrap text-caption text-muted"
+                className="pointer-events-none absolute m-0 whitespace-nowrap text-caption text-ink"
                 style={{ left: beatToPx(dropHint.beat, pxPerBeat) + 8, top: tracks.length * LANE_HEIGHT + 14 }}
               >
                 New track

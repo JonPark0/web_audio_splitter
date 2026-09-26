@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { FiMinus, FiPlay, FiPlus, FiRotateCcw, FiRotateCw, FiSquare } from 'react-icons/fi';
+import { FiMinus, FiPlay, FiPlus, FiSquare } from 'react-icons/fi';
 import TextButton from '../../components/TextButton';
 import { MAX_BPM, MIN_BPM } from '../project';
 import { useClockListener } from './playheadClock';
@@ -20,7 +20,7 @@ function PositionReadout({ clock, beatsPerBar }) {
     <span
       ref={ref}
       aria-label="Position (bar.beat.sixteenth)"
-      className="inline-block min-w-[5.5rem] text-h3 tabular-nums leading-tight"
+      className="inline-block min-w-24 text-h3 tabular-nums leading-tight"
     >
       1.1.1
     </span>
@@ -81,7 +81,7 @@ function BpmInput({ bpm, onCommit }) {
           }
         }}
         aria-label="Project BPM"
-        className="ainput w-16 !pb-0.5 tabular-nums"
+        className="ainput w-16 !pb-1 tabular-nums"
       />
       <span className="text-caption text-muted">BPM</span>
     </label>
@@ -111,7 +111,8 @@ export default function TransportBar({
   onZoom,
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-x-7 gap-y-3 border-t border-line pt-3">
+    // Separated from the project bar by whitespace, not a rule.
+    <div className="flex flex-wrap items-center gap-x-6 gap-y-3 pt-3">
       <div className="flex items-center gap-4">
         <TextButton
           onClick={onTogglePlay}
@@ -142,32 +143,19 @@ export default function TransportBar({
         </TextButton>
       </div>
 
-      <div className="flex items-center gap-3">
-        <TextButton
-          muted
-          label=""
-          onClick={onUndo}
-          disabled={!canUndo}
-          aria-label="Undo"
-          title="Undo (Ctrl/Cmd+Z)"
-        >
-          <FiRotateCcw className="icon" strokeWidth={1.5} aria-hidden="true" />
+      {/* Words, not arrows: the icons said nothing the words don't */}
+      <div className="flex items-baseline gap-5">
+        <TextButton muted onClick={onUndo} disabled={!canUndo} title="Undo (Ctrl/Cmd+Z)">
+          Undo
         </TextButton>
-        <TextButton
-          muted
-          label=""
-          onClick={onRedo}
-          disabled={!canRedo}
-          aria-label="Redo"
-          title="Redo (Ctrl/Cmd+Shift+Z or Ctrl+Y)"
-        >
-          <FiRotateCw className="icon" strokeWidth={1.5} aria-hidden="true" />
+        <TextButton muted onClick={onRedo} disabled={!canRedo} title="Redo (Ctrl/Cmd+Shift+Z or Ctrl+Y)">
+          Redo
         </TextButton>
       </div>
 
       <label className="flex items-baseline gap-2">
         <span className="text-caption text-muted">Snap</span>
-        <select value={snap} onChange={(e) => onSnapChange(e.target.value)} className="ainput w-24 !pb-0.5" aria-label="Snap">
+        <select value={snap} onChange={(e) => onSnapChange(e.target.value)} className="ainput w-24 !pb-1" aria-label="Snap">
           {SNAP_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>
               {o.label}

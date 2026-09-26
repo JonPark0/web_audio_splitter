@@ -27,7 +27,7 @@ export default function ConfirmAction({ label = 'Delete', question = 'Delete?', 
       className={`inline-flex flex-wrap items-baseline gap-x-3 gap-y-1 ${className}`}
       onKeyDown={(e) => e.key === 'Escape' && setAsking(false)}
     >
-      <span className="text-muted">{question}</span>
+      <span>{question}</span>
       <TextButton
         autoFocus
         disabled={disabled}

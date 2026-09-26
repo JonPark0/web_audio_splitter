@@ -42,7 +42,7 @@ export default function InlineName({ value, onCommit, label, className = '', inp
             finish();
           }
         }}
-        className={`ainput !pb-0.5 ${inputClassName}`}
+        className={`ainput !pb-1 ${inputClassName}`}
       />
     );
   }
@@ -58,7 +58,7 @@ export default function InlineName({ value, onCommit, label, className = '', inp
         setEditing(true);
       }}
       title="Rename"
-      className={`block min-w-0 cursor-text truncate border-0 bg-transparent p-0 text-left leading-tight text-ink ${className}`}
+      className={`weight-hover block min-w-0 cursor-text truncate border-0 bg-transparent p-0 text-left leading-tight text-ink ${className}`}
     >
       {value}
     </button>
