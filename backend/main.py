@@ -33,6 +33,9 @@ SPECTROGRAM_DIR.mkdir(parents=True, exist_ok=True)
 
 MAX_DURATION_SECONDS = 1800  # 30 minutes
 RECOVERED_SUBDIR = "recovered"
+# A task's stems and spectrograms never change once written, so the browser
+# can reuse them (e.g. when toggling original/recovered) without revalidating.
+IMMUTABLE_CACHE_HEADERS = {"Cache-Control": "private, max-age=86400"}
 
 # In-memory storage for task status (in a real app, use Redis/DB)
 tasks = {}
@@ -163,8 +166,11 @@ def download_youtube_audio(task_id: str, url: str):
         tasks[task_id]["error"] = str(e)
 
 
+# Endpoints that block (file copy, yt-dlp network calls, ffmpeg) are plain
+# `def` so FastAPI runs them in its threadpool; as `async def` they stalled
+# the event loop, holding up every other request (e.g. status polling).
 @app.post("/upload")
-async def upload_audio(
+def upload_audio(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     model: str = Form("htdemucs"),
@@ -194,7 +200,7 @@ async def upload_audio(
 
 
 @app.post("/youtube/info")
-async def youtube_info(url: str = Form(...)):
+def youtube_info(url: str = Form(...)):
     """Validate a YouTube URL and return video metadata without downloading."""
     ydl_opts = {
         "quiet": True,
@@ -353,11 +359,11 @@ def _resolve_track_path(task_id: str, track_name: str, variant: str) -> Path:
 @app.get("/download/{task_id}/{track_name}")
 async def download_track(task_id: str, track_name: str, variant: str = "original"):
     file_path = _resolve_track_path(task_id, track_name, variant)
-    return FileResponse(file_path)
+    return FileResponse(file_path, headers=IMMUTABLE_CACHE_HEADERS)
 
 
 @app.get("/spectrogram/{task_id}/{track_name}")
-async def get_spectrogram(task_id: str, track_name: str, variant: str = "original"):
+def get_spectrogram(task_id: str, track_name: str, variant: str = "original"):
     """Render (and cache) a spectrogram PNG for a stem, so the UI can show
     the recovered high-frequency content instead of just claiming it exists."""
     file_path = _resolve_track_path(task_id, track_name, variant)
@@ -377,7 +383,7 @@ async def get_spectrogram(task_id: str, track_name: str, variant: str = "origina
         if process.returncode != 0 or not png_path.exists():
             raise HTTPException(status_code=500, detail="Failed to generate spectrogram")
 
-    return FileResponse(png_path, media_type="image/png")
+    return FileResponse(png_path, media_type="image/png", headers=IMMUTABLE_CACHE_HEADERS)
 
 
 if __name__ == "__main__":
