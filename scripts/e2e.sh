@@ -4,6 +4,8 @@
 #
 # usage: scripts/e2e.sh <clip.wav> <separation_model> [recovery_model]
 #   BASE=http://localhost:8000 (default) points at the backend.
+#   KEEP=1 keeps the test job (by default it's deleted on exit, pass or fail,
+#   so repeated runs don't fill the jobs list).
 # Exits non-zero if the job fails, times out, or a download is missing.
 set -u
 CLIP=${1:?usage: e2e.sh <clip.wav> <model> [recovery_model]}
@@ -20,6 +22,15 @@ else
   TID=$(curl -s -F "file=@$CLIP" -F "model=$MODEL" "$BASE/upload" | json "d['task_id']")
 fi
 [ -n "$TID" ] || { echo "FAIL: upload rejected"; exit 1; }
+cleanup() {
+  [ "${KEEP:-0}" = 1 ] && return
+  curl -s -o /dev/null -X POST "$BASE/tasks/$TID/cancel"
+  for _ in 1 2 3 4 5; do
+    [ "$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "$BASE/tasks/$TID")" != 409 ] && return
+    sleep 2
+  done
+}
+trap cleanup EXIT
 echo "[$MODEL${RECOVERY:++$RECOVERY}] task $TID"
 
 last=""
