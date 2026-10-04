@@ -1,59 +1,117 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { errorDetail, getResult } from '../api';
+import { href, navigate } from '../router';
 import Mixer from './Mixer';
 import RetryPanel from './RetryPanel';
 import TextButton from './TextButton';
-import ReturnIcon from './ReturnIcon';
-import useTaskModel from './useTaskModel';
 
-export default function ResultScreen({ taskId, result, model, setStep, onRetried }) {
-  const tracks = result?.tracks || [];
-  const recoveredTracks = result?.recovered_tracks || [];
+/**
+ * A finished job's stems (route /split/job/<taskId>, once completed). Fetches
+ * its own /result; the mixer, extract and job actions live below.
+ */
+export default function ResultScreen({ taskId }) {
+  const [state, setState] = useState({ status: 'loading' });
+  const [song, setSong] = useState({ bpm: null, key: null });
   const [retrying, setRetrying] = useState(false);
-  // /result doesn't report the separation model; look it up once the panel opens.
-  const jobModel = useTaskModel(taskId, result?.model || model, retrying);
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    setState({ status: 'loading' });
+    getResult(taskId)
+      .then((res) => {
+        if (cancelled) return;
+        setState({ status: 'ready', result: res.data });
+        setSong({ bpm: res.data.bpm ?? null, key: res.data.key ?? null });
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setState({ status: 'error', code: err?.response?.status, message: errorDetail(err, 'Could not load the stems') });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [taskId, attempt]);
+
+  // Old jobs get tempo/key analysed on first open: ask again a few times.
+  const result = state.result;
+  useEffect(() => {
+    if (!result || !('bpm' in result) || song.bpm) return undefined;
+    let tries = 0;
+    let cancelled = false;
+    const id = setInterval(() => {
+      tries += 1;
+      getResult(taskId)
+        .then((res) => {
+          if (cancelled) return;
+          if (res.data.bpm || res.data.key) setSong({ bpm: res.data.bpm ?? null, key: res.data.key ?? null });
+        })
+        .catch(() => {});
+      if (tries >= 5) clearInterval(id);
+    }, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [result, song.bpm, taskId]);
+
+  const onStarted = useCallback(({ task_id: id }) => navigate(`/split/job/${id}`), []);
+
+  if (state.status === 'loading') {
+    return (
+      <p className="m-0 flex h-8 items-center text-caption text-muted" role="status">
+        Loading stems…
+      </p>
+    );
+  }
+
+  if (state.status === 'error') {
+    const gone = state.code === 404;
+    const notDone = state.code === 400;
+    return (
+      <div className="flex min-h-8 flex-wrap items-baseline gap-x-5 gap-y-1 py-1 text-caption" role="alert">
+        <p className="m-0">
+          <span className="text-muted">{gone ? 'Gone — ' : notDone ? 'No stems — ' : 'Error — '}</span>
+          {gone
+            ? "this job's stems are no longer on the server (deleted or expired)."
+            : notDone
+              ? "this job hasn't finished, failed, or no longer exists."
+              : state.message}
+        </p>
+        {!gone && !notDone && (
+          <TextButton onClick={() => setAttempt((n) => n + 1)} className="rs-hit">
+            Try again
+          </TextButton>
+        )}
+        <TextButton as="a" href={href('/split')} className="rs-hit">
+          ← Jobs
+        </TextButton>
+      </div>
+    );
+  }
 
   return (
-    <div className="flex w-full flex-col">
-      <div className="mx-auto mb-20 mt-16 max-w-frame text-center">
-        <h1 className="m-0 mb-3 text-title-sm font-light leading-tight md:text-title">Your Stems</h1>
-        {result?.name && <p className="m-0 mb-2 truncate text-muted">{result.name}</p>}
-        <p className="m-0 mb-4 text-h3">
-          {tracks.length} {tracks.length === 1 ? 'track' : 'tracks'}
-        </p>
-        <p className="m-0 text-muted">
-          {result?.recovered ? `Restored with ${result.recovery_model}` : 'Separated without restoration'}
-        </p>
-        <div className="mt-6 flex flex-wrap items-baseline justify-center gap-x-8 gap-y-3">
-          <TextButton label="New File" onClick={() => setStep('upload')}>
-            <span className="inline-flex items-center gap-2">
-              <ReturnIcon />
-              <span>New File</span>
-            </span>
-          </TextButton>
-          <TextButton
-            muted
-            current={retrying}
-            aria-expanded={retrying}
-            onClick={() => setRetrying((r) => !r)}
-            title="Run this job again with a different model or restoration"
-          >
-            Retry with other settings
-          </TextButton>
-        </div>
-        {retrying && (
+    <Mixer
+      key={taskId}
+      taskId={taskId}
+      result={result}
+      bpm={song.bpm}
+      songKey={song.key}
+      retrying={retrying}
+      onRetryToggle={() => setRetrying((r) => !r)}
+      retryPanel={
+        retrying ? (
           <RetryPanel
-            className="mx-auto mt-8 max-w-measure pt-6 text-left max-md:text-center"
+            className="max-w-measure border-t border-line py-3"
             taskId={taskId}
-            initialModel={jobModel}
-            initialRecover={!!result?.recovered}
-            initialRecoveryModel={result?.recovery_model}
-            onStarted={onRetried}
+            initialModel={result.model}
+            initialRecover={result.recover ?? !!result.recovered}
+            initialRecoveryModel={result.recovery_model}
+            onStarted={onStarted}
             onCancel={() => setRetrying(false)}
           />
-        )}
-      </div>
-
-      <Mixer taskId={taskId} tracks={tracks} recoveredTracks={recoveredTracks} />
-    </div>
+        ) : null
+      }
+    />
   );
 }

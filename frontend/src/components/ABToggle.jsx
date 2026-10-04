@@ -1,26 +1,45 @@
 import React from 'react';
-import WordToggle from './WordToggle';
 
 const OPTIONS = [
-  { value: 'original', label: 'Original' },
-  { value: 'recovered', label: 'Recovered' },
+  { value: 'original', short: 'O', label: 'Original' },
+  { value: 'recovered', short: 'R', label: 'Recovered' },
 ];
 
-/** Original vs. recovered switch for a single stem. */
-export default function ABToggle({ name, variant, onChange, disabled }) {
+/**
+ * Original vs. recovered switch for one stem. `compact` draws "O | R" for the
+ * mixer's label column (full names in the title and for screen readers);
+ * otherwise the words. Switching is instant and stays in sync — both
+ * variants play side by side and only their gains change.
+ */
+export default function ABToggle({ variant, onChange, disabled, compact = false, recoveryModel, className = '' }) {
   return (
-    <div
-      className="text-caption"
-      title={disabled ? 'Recovery was not run for this track' : 'Compare original vs. recovered'}
-    >
-      <WordToggle
-        name={name}
-        options={OPTIONS}
-        value={variant}
-        onChange={onChange}
-        disabled={disabled}
-        centerOnMobile={false}
-      />
+    <div role="radiogroup" aria-label="Variant" className={`flex items-baseline ${compact ? 'gap-1' : 'gap-4'} ${className}`}>
+      {OPTIONS.map((o, i) => {
+        const checked = o.value === variant;
+        const title = o.value === 'recovered' && recoveryModel ? `${o.label} (${recoveryModel})` : o.label;
+        return (
+          <React.Fragment key={o.value}>
+            {compact && i > 0 && (
+              <span aria-hidden="true" className="text-line">
+                |
+              </span>
+            )}
+            <button
+              type="button"
+              role="radio"
+              aria-checked={checked}
+              aria-label={title}
+              title={title}
+              disabled={disabled}
+              data-label={compact ? o.short : o.label}
+              onClick={() => onChange(o.value)}
+              className={`link rs-hit ${checked ? 'is-current' : 'link--muted'}`}
+            >
+              {compact ? o.short : o.label}
+            </button>
+          </React.Fragment>
+        );
+      })}
     </div>
   );
 }

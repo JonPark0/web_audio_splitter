@@ -1,0 +1,65 @@
+/* Result screen (mixer + extract) — things utilities can't express. */
+
+/* Waveform lanes: vertical page scroll stays native on touch; horizontal
+   drags, taps and pinches come to the lane gestures. No text selection or
+   iOS callout while dragging. */
+.rs-lane {
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* Small text controls get a ≥44×44 px hit area on touch screens without
+   changing how they look (the ::after of .link is its weight ghost). */
+.rs-hit {
+  position: relative;
+}
+@media (pointer: coarse) {
+  .rs-hit::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: max(100%, 44px);
+    height: max(100%, 44px);
+    transform: translate(-50%, -50%);
+  }
+}
+
+/* dB fader: a tick at the 0 dB detent (thumb travel is inset by half the
+   9 px thumb at both ends). */
+.rs-fader {
+  --rs-x: calc(4.5px + (100% - 9px) * var(--rs-zero-frac, 0.8889));
+  background-image: linear-gradient(
+    to right,
+    transparent var(--rs-x),
+    var(--muted) var(--rs-x),
+    var(--muted) calc(var(--rs-x) + 1px),
+    transparent calc(var(--rs-x) + 1px)
+  );
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 100% 7px;
+}
+@media (pointer: coarse) {
+  .rs-fader {
+    height: 44px;
+  }
+}
+
+/* Inputs: 16 px on touch so iOS doesn't zoom the page on focus. */
+@media (pointer: coarse) {
+  .rs-input {
+    font-size: 16px;
+  }
+}
+
+.rs-bottom-bar {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Spectrogram strip: ffmpeg's colour map on black → ink on paper. */
+.rs-spec {
+  filter: grayscale(1) invert(1);
+}
