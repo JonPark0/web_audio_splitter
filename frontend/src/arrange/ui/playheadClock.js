@@ -37,7 +37,8 @@ export function usePositionClock(engine, playing, cursorBeat) {
     const tick = () => {
       let beat = beatRef.current;
       try {
-        const b = engine.getPositionBeats();
+        // The heard position (output latency taken off), not the scheduler's.
+        const b = engine.getDisplayPositionBeats ? engine.getDisplayPositionBeats() : engine.getPositionBeats();
         if (Number.isFinite(b)) beat = b;
       } catch (e) {
         // keep the last known position
