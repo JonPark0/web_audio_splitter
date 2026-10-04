@@ -1,16 +1,17 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { FiMinus, FiPlus } from 'react-icons/fi';
 import TextButton from '../../components/TextButton';
-import { formatBpm } from '../../components/library/format';
-import { canWarp, clipDurationBeats, clipRate } from '../project';
-import { formatBarBeat, formatBeats } from './snap';
+import { MAX_BPM, MIN_BPM, canWarp, clipDurationBeats, clipDurationSeconds, clipRate, clipRegionBeats, isLooped } from '../project';
+import { CommitField, Group } from './fields';
+import { MIN_DB, dbToGain, formatBarBeat, formatBeats, formatBpm, formatDb, gainToDb } from './snap';
 
-function formatGain(gain) {
-  if (gain <= 0) return '−∞ dB';
-  const db = 20 * Math.log10(gain);
-  const r = Math.round(db * 10) / 10;
-  return `${r > 0 ? '+' : r < 0 ? '−' : ''}${Math.abs(r).toFixed(1)} dB`;
-}
+export const MIN_SEMITONES = -24;
+export const MAX_SEMITONES = 24;
+const clampSemitones = (v) => Math.min(MAX_SEMITONES, Math.max(MIN_SEMITONES, Math.round(v)));
+const clampCents = (v) => Math.min(100, Math.max(-100, Math.round(v)));
+const roundBpm = (v) => Math.round(v * 100) / 100;
+const inBpmRange = (v) => v >= MIN_BPM && v <= MAX_BPM;
+const FIT_BARS = [1, 2, 4, 8];
 
 function findClip(project, id) {
   for (const track of project.tracks) {
@@ -20,170 +21,222 @@ function findClip(project, id) {
   return null;
 }
 
-export const MIN_SEMITONES = -24;
-export const MAX_SEMITONES = 24;
-const clampSemitones = (v) => Math.min(MAX_SEMITONES, Math.max(MIN_SEMITONES, Math.round(v)));
+const signed = (v, unit) => (v ? `${v > 0 ? '+' : '−'}${Math.abs(v)}${unit}` : `0${unit}`);
 
-function formatSemitones(st) {
-  if (!st) return '0 st';
-  return `${st > 0 ? '+' : '−'}${Math.abs(st)} st`;
-}
+const iconBtn = 'min-w-[20px] items-center justify-center [@media(pointer:coarse)]:min-h-[44px] [@media(pointer:coarse)]:min-w-[44px]';
+const wordBtn = '[@media(pointer:coarse)]:min-h-[44px] justify-center';
 
-/** Semitones typed: Enter/blur commits (rounded, clamped), Escape or bad input reverts. */
-function SemitoneInput({ value, onCommit }) {
-  const shown = value == null ? '' : String(value);
-  const [draft, setDraft] = useState(shown);
-  const focused = useRef(false);
-  const cancel = useRef(false);
-
-  useEffect(() => {
-    if (!focused.current) setDraft(shown);
-  }, [shown]);
-
-  const commit = () => {
-    if (!focused.current) return;
-    focused.current = false;
-    const n = Number(draft);
-    if (cancel.current || draft.trim() === '' || !Number.isFinite(n)) {
-      cancel.current = false;
-      setDraft(shown);
-      return;
-    }
-    const next = clampSemitones(n);
-    setDraft(String(next));
-    if (next !== value) onCommit(next);
-  };
-
+/** On/Off word toggle (Palnarium: current weight when on). */
+function Toggle({ on, onChange, disabled, title, label }) {
   return (
-    <input
-      type="number"
-      inputMode="numeric"
-      min={MIN_SEMITONES}
-      max={MAX_SEMITONES}
-      step="1"
-      value={draft}
-      placeholder="—"
-      onFocus={() => {
-        focused.current = true;
-      }}
-      onChange={(e) => {
-        focused.current = true;
-        setDraft(e.target.value);
-      }}
-      onBlur={commit}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === 'Escape') {
-          cancel.current = e.key === 'Escape';
-          commit();
-          e.currentTarget.blur();
-        }
-      }}
-      aria-label="Pitch in semitones"
-      className="ainput w-12 !pb-1 text-center tabular-nums"
-    />
-  );
-}
-
-/**
- * Pitch shift for one or several clips: -/+ a semitone, typed value, reset.
- * Shifted clips are rendered on the server and stay silent until the render
- * arrives, so say so while the engine is fetching.
- */
-function PitchControl({ clips, loading, onApply }) {
-  const values = clips.map((c) => c.semitones || 0);
-  const common = values.every((v) => v === values[0]) ? values[0] : null;
-  const shifted = values.some((v) => v !== 0);
-  const apply = (fn) => onApply(clips.map((c) => ({ clipId: c.id, patch: { semitones: clampSemitones(fn(c.semitones || 0)) } })));
-
-  let status = 'Original pitch';
-  if (shifted) status = loading > 0 ? 'Rendering…' : 'Rendered on the server';
-  if (common === null) status = `Mixed · ${status.toLowerCase()}`;
-
-  return (
-    <div
-      className="flex min-w-0 flex-col"
-      title="Pitch shift in semitones. Shifted clips are rendered on the server and play once the render has loaded."
+    <TextButton
+      current={on}
+      aria-pressed={on}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onChange(!on)}
+      title={title}
+      label="Off"
+      className={wordBtn}
     >
-      <span className="flex justify-between gap-2 text-caption text-muted">
-        <span>Pitch</span>
-        <span className="tabular-nums">{common === null ? 'Mixed' : formatSemitones(common)}</span>
-      </span>
-      <span className="flex items-center gap-2">
-        <TextButton
-          muted
-          label=""
-          onClick={() => apply((v) => v - 1)}
-          disabled={values.every((v) => v <= MIN_SEMITONES)}
-          aria-label="Pitch down a semitone"
-          title="Down a semitone"
-        >
-          <FiMinus className="icon" strokeWidth={1.5} aria-hidden="true" />
-        </TextButton>
-        <SemitoneInput value={common} onCommit={(st) => apply(() => st)} />
-        <TextButton
-          muted
-          label=""
-          onClick={() => apply((v) => v + 1)}
-          disabled={values.every((v) => v >= MAX_SEMITONES)}
-          aria-label="Pitch up a semitone"
-          title="Up a semitone"
-        >
-          <FiPlus className="icon" strokeWidth={1.5} aria-hidden="true" />
-        </TextButton>
-        <TextButton muted onClick={() => apply(() => 0)} disabled={!shifted} className="text-caption">
-          Reset
-        </TextButton>
-      </span>
-      <span role="status" className="truncate text-caption text-muted">
-        {status}
-      </span>
-    </div>
+      {on ? 'On' : 'Off'}
+    </TextButton>
   );
 }
 
-function Stat({ label, children }) {
+/** Pitch for one or several clips: −/+ a semitone, typed semitones and cents. */
+function PitchControl({ clips, onApply, className = '' }) {
+  const st = clips.map((c) => c.semitones || 0);
+  const ct = clips.map((c) => c.cents || 0);
+  const commonSt = st.every((v) => v === st[0]) ? st[0] : null;
+  const commonCt = ct.every((v) => v === ct[0]) ? ct[0] : null;
+  const apply = (patchFn) => onApply(clips.map((c) => ({ clipId: c.id, patch: patchFn(c) })));
   return (
-    <div className="flex min-w-0 flex-col">
-      <span className="text-caption text-muted">{label}</span>
-      <span className="truncate tabular-nums">{children}</span>
-    </div>
+    <Group label="Pitch (st · cents)" className={className} title="Pitch shift; rendered on the server, the clip is hatched until the render arrives">
+      <TextButton
+        muted
+        label=""
+        onClick={() => apply((c) => ({ semitones: clampSemitones((c.semitones || 0) - 1) }))}
+        aria-label="Pitch down a semitone"
+        className={iconBtn}
+      >
+        <FiMinus className="icon" strokeWidth={1.5} aria-hidden="true" />
+      </TextButton>
+      <CommitField
+        value={commonSt}
+        label="Semitones"
+        inputMode="numeric"
+        parse={(t) => (Number.isFinite(Number(t)) ? clampSemitones(Number(t)) : null)}
+        onCommit={(v) => apply(() => ({ semitones: v }))}
+        className="w-9 text-center"
+      />
+      <TextButton
+        muted
+        label=""
+        onClick={() => apply((c) => ({ semitones: clampSemitones((c.semitones || 0) + 1) }))}
+        aria-label="Pitch up a semitone"
+        className={iconBtn}
+      >
+        <FiPlus className="icon" strokeWidth={1.5} aria-hidden="true" />
+      </TextButton>
+      <CommitField
+        value={commonCt}
+        label="Cents"
+        inputMode="numeric"
+        parse={(t) => (Number.isFinite(Number(t)) ? clampCents(Number(t)) : null)}
+        onCommit={(v) => apply(() => ({ cents: v }))}
+        className="w-10 text-center"
+        title="Fine pitch, −100..100 cents"
+      />
+    </Group>
   );
 }
 
-/** Selected-clip details: timing, warp, pitch, gain; bulk actions for a multi-selection. */
-export default function ClipInspector({ project, selection, loading = 0, onUpdateClip, onUpdateClips, onDuplicate, onDelete }) {
-  const actions = (
-    <div className="flex items-baseline gap-5 text-caption">
-      <TextButton muted onClick={onDuplicate} title="Duplicate (Ctrl/Cmd+D)">
+/** Tap tempo: 2+ taps show a BPM to apply; resets after 2 s idle. */
+function TapTempo({ onApply }) {
+  const taps = useRef([]);
+  const [bpm, setBpm] = useState(null);
+  const tap = () => {
+    const now = performance.now();
+    const list = taps.current.filter((t) => now - t < 2000 * Math.max(1, taps.current.length));
+    if (list.length && now - list[list.length - 1] > 2000) list.length = 0;
+    list.push(now);
+    taps.current = list.slice(-8);
+    if (taps.current.length >= 2) {
+      const span = taps.current[taps.current.length - 1] - taps.current[0];
+      setBpm(roundBpm((60000 * (taps.current.length - 1)) / span));
+    } else setBpm(null);
+  };
+  return (
+    <>
+      <TextButton muted onClick={tap} className={wordBtn} title="Tap along to the sample">
+        Tap
+      </TextButton>
+      {bpm !== null && inBpmRange(bpm) && (
+        <TextButton
+          onClick={() => {
+            onApply(bpm);
+            taps.current = [];
+            setBpm(null);
+          }}
+          className={wordBtn}
+          title="Use the tapped tempo"
+        >
+          {`Set ${formatBpm(bpm)}`}
+        </TextButton>
+      )}
+    </>
+  );
+}
+
+/** Library BPM of the clip's sample: typed, ×2 / ÷2, tap, or fit the trimmed length to N bars. */
+function SampleBpmControl({ clip, sample, beatsPerBar, onSampleBpm, className = '' }) {
+  if (!sample) return null;
+  const bpm = sample.bpm;
+  const set = (v, opts) => inBpmRange(v) && onSampleBpm(sample, roundBpm(v), opts);
+  const fit = (bars) => (bars * beatsPerBar * 60) / clip.length_sec;
+  return (
+    <Group label="Sample BPM (library)" className={className} title="The sample's own tempo, saved to the Library; warped clips stretch from it">
+      <CommitField
+        value={bpm}
+        label="Sample BPM"
+        format={(v) => (v == null ? '' : formatBpm(v))}
+        parse={(t) => {
+          const n = Number(t);
+          return Number.isFinite(n) && inBpmRange(n) ? roundBpm(n) : null;
+        }}
+        onCommit={(v) => set(v)}
+        className="w-14"
+      />
+      <TextButton muted onClick={() => set(bpm * 2)} disabled={bpm == null || !inBpmRange(bpm * 2)} className={wordBtn} title="Double">
+        ×2
+      </TextButton>
+      <TextButton muted onClick={() => set(bpm / 2)} disabled={bpm == null || !inBpmRange(bpm / 2)} className={wordBtn} title="Halve">
+        ÷2
+      </TextButton>
+      <TapTempo onApply={(v) => set(v)} />
+      <span className="text-caption text-muted">Fit</span>
+      {FIT_BARS.map((n) => (
+        <TextButton
+          key={n}
+          muted
+          onClick={() => set(fit(n), { warpClipId: clip.id })}
+          disabled={!inBpmRange(fit(n))}
+          className={wordBtn}
+          title={`Set the BPM so the trimmed region is ${n} ${n === 1 ? 'bar' : 'bars'} long, and warp this clip`}
+        >
+          {`${n}`}
+        </TextButton>
+      ))}
+    </Group>
+  );
+}
+
+function ClipActions({ onDuplicate, onDuplicateNextBar, onSplit, onDelete, compact }) {
+  return (
+    <div className={`flex flex-wrap items-center ${compact ? 'gap-x-4' : 'gap-x-5'} gap-y-1 text-caption`}>
+      <TextButton muted onClick={onDuplicate} title="Duplicate right after (Ctrl/Cmd+D)" className={wordBtn}>
         Duplicate
       </TextButton>
-      <TextButton muted onClick={onDelete} title="Delete (Del / Backspace)">
+      <TextButton muted onClick={onDuplicateNextBar} title="Copy to the next bar line" className={wordBtn}>
+        Next bar
+      </TextButton>
+      <TextButton muted onClick={onSplit} title="Split at the playhead (S or Ctrl/Cmd+E)" className={wordBtn}>
+        Split
+      </TextButton>
+      <TextButton muted onClick={onDelete} title="Delete (Del / Backspace)" className={wordBtn}>
         Delete
       </TextButton>
     </div>
   );
+}
 
-  if (selection.length === 0) {
-    // How to edit is read to act on, so it stays ink.
-    return (
-      <p className="m-0 text-caption">
-        Click a clip to select it · Shift adds · drag to move · drag its edges to trim · Space plays ·
-        Ctrl/Cmd+Z undoes · Ctrl/Cmd+wheel zooms
-      </p>
-    );
-  }
+/**
+ * Selected-clip editor: timing, loop, warp + sample BPM tools, pitch,
+ * gain, fades, reverse; bulk pitch and actions for a multi-selection.
+ * `variant` 'dock' (desktop bottom dock: dense rows) or 'sheet'.
+ */
+export default function ClipInspector({
+  project,
+  selection,
+  pending,
+  variant = 'dock',
+  onPatchClip,
+  onPatchClips,
+  onDuplicate,
+  onDuplicateNextBar,
+  onSplit,
+  onDelete,
+  onSampleBpm,
+}) {
+  const sheet = variant === 'sheet';
+  const actions = (
+    <ClipActions onDuplicate={onDuplicate} onDuplicateNextBar={onDuplicateNextBar} onSplit={onSplit} onDelete={onDelete} compact={!sheet} />
+  );
+  // Sheet: two columns even on a phone (short groups pair up; the wide
+  // BPM and pitch rows span both), so the sheet stays short.
+  const grid = sheet ? 'grid grid-cols-2 gap-x-4 gap-y-1 px-4 py-2 sm:grid-cols-3' : 'flex flex-wrap items-start gap-x-7 gap-y-1';
+  const wide = sheet ? 'col-span-2 sm:col-span-3' : '';
 
   if (selection.length > 1) {
     const clips = selection.map((id) => findClip(project, id)?.clip).filter(Boolean);
+    const allRev = clips.every((c) => c.reverse);
     return (
-      <div className="flex flex-col gap-4">
-        <div className="flex flex-wrap items-baseline justify-between gap-x-8 gap-y-2">
-          <span>{selection.length} clips selected</span>
+      <div className={`flex flex-col ${sheet ? '' : 'gap-1'}`}>
+        <div className={`flex flex-wrap items-center justify-between gap-x-6 gap-y-1 ${sheet ? 'px-4 pt-3' : ''}`}>
+          <span className="text-h4">{selection.length} clips selected</span>
           {actions}
         </div>
         {clips.length > 0 && (
-          <div className="grid grid-cols-2 gap-x-6 sm:grid-cols-4">
-            <PitchControl clips={clips} loading={loading} onApply={onUpdateClips} />
+          <div className={grid}>
+            <PitchControl clips={clips} onApply={onPatchClips} className={wide} />
+            <Group label="Reverse">
+              <Toggle
+                on={allRev}
+                label="Reverse"
+                onChange={(on) => onPatchClips(clips.map((c) => ({ clipId: c.id, patch: { reverse: on } })))}
+              />
+            </Group>
           </div>
         )}
       </div>
@@ -198,65 +251,106 @@ export default function ClipInspector({ project, selection, loading = 0, onUpdat
   const warpable = canWarp(sample);
   const rate = clipRate(clip, sample, project.bpm);
   const beats = clipDurationBeats(clip, sample, project.bpm);
+  const regionBeats = clipRegionBeats(clip, sample, project.bpm);
+  const looped = isLooped(clip);
+  const durSec = clipDurationSeconds(clip, sample, project.bpm);
+  const patch = (p, opts) => onPatchClip(clip.id, p, opts);
+  const msField = (key) => (
+    <CommitField
+      value={Math.round((clip[key] || 0) * 1000)}
+      label={key === 'fade_in_sec' ? 'Fade in (ms)' : 'Fade out (ms)'}
+      inputMode="numeric"
+      parse={(t) => {
+        const n = Number(t);
+        return Number.isFinite(n) && n >= 0 ? Math.round(n) : null;
+      }}
+      onCommit={(ms) => {
+        const other = key === 'fade_in_sec' ? clip.fade_out_sec || 0 : clip.fade_in_sec || 0;
+        patch({ [key]: Math.min(ms / 1000, Math.max(0, durSec - other)) });
+      }}
+      className="w-14"
+    />
+  );
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-8 gap-y-2">
-        <p className="m-0 min-w-0 truncate text-h4">
+    <div className={`flex flex-col ${sheet ? '' : 'gap-0.5'}`}>
+      <div className={`flex flex-wrap items-center justify-between gap-x-6 gap-y-1 ${sheet ? 'px-4 pt-3' : ''}`}>
+        <p className="m-0 min-w-0 truncate text-h4 leading-tight">
           {sample?.name || 'Missing sample'}
-          <span className="text-caption text-muted"> · {track.name}</span>
+          <span className="text-caption text-muted">
+            {' '}
+            · {track.name} · {formatBarBeat(clip.start_beat, bpb)} · {formatBeats(beats)} beats
+            {pending?.has(clip.id) ? ' · rendering…' : ''}
+          </span>
         </p>
         {actions}
       </div>
 
-      <div className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-4 xl:grid-cols-[repeat(4,minmax(0,1fr))_repeat(3,minmax(0,1.5fr))]">
-        <Stat label="Start">{formatBarBeat(clip.start_beat, bpb)}</Stat>
-        <Stat label="Length">{formatBeats(beats)} beats</Stat>
-        <Stat label="Source">
-          {clip.offset_sec.toFixed(2)}–{(clip.offset_sec + clip.length_sec).toFixed(2)} s
-        </Stat>
-        <Stat label="Tempo">
-          {sample?.bpm != null ? formatBpm(sample.bpm) : '—'} → {formatBpm(project.bpm)} BPM
-        </Stat>
+      <div className={grid}>
+        <Group label={looped ? `Loop · ${formatBeats(regionBeats)}-beat region` : 'Loop'} title="Repeat the trimmed region; drag the clip's right edge to extend">
+          <Toggle
+            on={looped}
+            label="Loop"
+            onChange={(on) => patch({ loop_beats: on ? Math.max(regionBeats, 1 / 16) : null }, { resolve: true })}
+          />
+          {looped && (
+            <>
+              <CommitField
+                value={clip.loop_beats}
+                label="Loop length (beats)"
+                format={(v) => formatBeats(v)}
+                parse={(t) => {
+                  const n = Number(t);
+                  return Number.isFinite(n) && n >= 1 / 16 ? n : null;
+                }}
+                onCommit={(v) => patch({ loop_beats: v }, { resolve: true })}
+                className="w-12"
+              />
+              <span className="text-caption text-muted">beats</span>
+            </>
+          )}
+        </Group>
 
-        <div className="flex min-w-0 flex-col">
-          <span className="text-caption text-muted">Warp</span>
-          <span className="flex flex-wrap items-baseline gap-x-3">
-            <TextButton
-              current={clip.warp && warpable}
-              aria-pressed={clip.warp && warpable}
-              disabled={!warpable}
-              onClick={() => onUpdateClip(clip.id, { warp: !clip.warp })}
-              title={warpable ? 'Stretch to follow the project tempo' : 'This sample has no BPM — set one in the Library'}
-              label="Off"
-            >
-              {clip.warp && warpable ? 'On' : 'Off'}
-            </TextButton>
-            <span className="text-caption text-muted">
-              {!warpable ? 'No sample BPM' : clip.warp ? `×${rate.toFixed(2)} speed` : 'Original speed'}
-            </span>
+        <Group label="Warp" title={warpable ? 'Stretch to follow the project tempo' : 'This sample has no BPM — set one here'}>
+          <Toggle on={clip.warp && warpable} label="Warp" disabled={!warpable} onChange={(on) => patch({ warp: on }, { resolve: true })} />
+          <span className="whitespace-nowrap text-caption text-muted">
+            {!warpable ? 'No sample BPM' : clip.warp ? `×${rate.toFixed(3)}` : 'Original speed'}
           </span>
-        </div>
+        </Group>
 
-        <PitchControl clips={[clip]} loading={loading} onApply={onUpdateClips} />
+        <SampleBpmControl clip={clip} sample={sample} beatsPerBar={bpb} onSampleBpm={onSampleBpm} className={wide} />
 
-        <label className="flex min-w-0 flex-col" title="Clip gain (double-click resets)">
-          <span className="flex justify-between text-caption text-muted">
-            <span>Gain</span>
-            <span className="tabular-nums">{formatGain(clip.gain)}</span>
-          </span>
+        <PitchControl clips={[clip]} onApply={onPatchClips} className={sheet ? 'col-span-2' : ''} />
+
+        <Group label={`Gain · ${formatDb(clip.gain)}`} title="Clip gain (double-click resets)" className={sheet ? '' : 'w-36'}>
           <input
             type="range"
-            min="0"
-            max="2"
-            step="0.01"
-            value={clip.gain}
-            onChange={(e) => onUpdateClip(clip.id, { gain: parseFloat(e.target.value) }, `gain:${clip.id}`)}
-            onDoubleClick={() => onUpdateClip(clip.id, { gain: 1 })}
-            className="slider"
+            min={MIN_DB}
+            max="12"
+            step="0.5"
+            value={gainToDb(clip.gain)}
+            onChange={(e) => patch({ gain: Math.min(4, Math.round(dbToGain(parseFloat(e.target.value)) * 10000) / 10000) }, { coalesce: `gain:${clip.id}` })}
+            onDoubleClick={() => patch({ gain: 1 })}
+            className="slider [@media(pointer:coarse)]:h-11"
             aria-label="Clip gain"
+            aria-valuetext={formatDb(clip.gain)}
           />
-        </label>
+        </Group>
+
+        <Group label="Fade in · out (ms)">
+          {msField('fade_in_sec')}
+          {msField('fade_out_sec')}
+        </Group>
+
+        <Group label="Reverse">
+          <Toggle on={!!clip.reverse} label="Reverse" onChange={(on) => patch({ reverse: on })} />
+        </Group>
+
+        <Group label="Source (s)">
+          <span className="whitespace-nowrap text-caption tabular-nums">
+            {clip.offset_sec.toFixed(2)}–{(clip.offset_sec + clip.length_sec).toFixed(2)}
+          </span>
+        </Group>
       </div>
     </div>
   );
