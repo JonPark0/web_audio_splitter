@@ -73,28 +73,38 @@ export default memo(function SampleCard({ sample, selected, checked, selecting, 
             </TextButton>
           )}
         </div>
-        <button
-          type="button"
-          role="gridcell"
-          className="flex h-[63px] min-w-0 flex-1 flex-col justify-center border-0 bg-transparent p-0 pl-1 text-left text-ink [-webkit-touch-callout:none] [-webkit-user-select:none]"
-          onPointerDown={startPress}
-          onPointerUp={endPress}
-          onPointerCancel={endPress}
-          onPointerLeave={endPress}
-          onContextMenu={(e) => e.preventDefault()}
-          onClick={() => {
-            if (longPressedRef.current) return;
-            if (selecting) ctx.toggleCheck(id, false);
-            else ctx.cardTap(sample);
-          }}
-          aria-label={`${sample.name}. ${meta}`}
-        >
-          <span className="flex min-w-0 items-baseline gap-2">
-            <span className={`min-w-0 truncate ${selected ? 'weight-up' : ''}`}>{sample.name}</span>
-            <StatusNote sample={sample} busy={busy} onAnalyze={() => ctx.analyze(id)} />
+        {/* The whole body is one tap target (a transparent button under the
+            text), so the status note's own Re-analyze button isn't nested
+            inside another button. */}
+        <div role="gridcell" className="relative flex h-[63px] min-w-0 flex-1 flex-col justify-center pl-1">
+          <button
+            type="button"
+            data-card-body
+            className="absolute inset-0 border-0 bg-transparent p-0 [-webkit-touch-callout:none] [-webkit-user-select:none]"
+            onPointerDown={startPress}
+            onPointerUp={endPress}
+            onPointerCancel={endPress}
+            onPointerLeave={endPress}
+            onContextMenu={(e) => e.preventDefault()}
+            onClick={() => {
+              if (longPressedRef.current) return;
+              if (selecting) ctx.toggleCheck(id, false);
+              else ctx.cardTap(sample);
+            }}
+            aria-label={`${sample.name}. ${meta}`}
+          />
+          <span className="pointer-events-none relative flex min-w-0 items-baseline gap-2">
+            <span aria-hidden="true" className={`min-w-0 truncate ${selected ? 'weight-up' : ''}`}>
+              {sample.name}
+            </span>
+            <span className="pointer-events-auto">
+              <StatusNote sample={sample} busy={busy} onAnalyze={() => ctx.analyze(id)} />
+            </span>
           </span>
-          <span className="truncate text-caption text-muted">{meta}</span>
-        </button>
+          <span aria-hidden="true" className="pointer-events-none relative truncate text-caption text-muted">
+            {meta}
+          </span>
+        </div>
         <TextButton
           label=""
           aria-label={`Actions for ${sample.name}`}

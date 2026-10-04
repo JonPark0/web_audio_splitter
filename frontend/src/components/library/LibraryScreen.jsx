@@ -360,7 +360,8 @@ export default function LibraryScreen() {
     },
     cardTap(sample) {
       setSelectedId(sample.id);
-      preview.toggle(sample);
+      // "Auto-play on tap" (filter sheet); off = tap only selects, ▶ plays
+      if (auto) preview.toggle(sample);
     },
     togglePlay(sample) {
       setSelectedId(sample.id);
@@ -399,7 +400,11 @@ export default function LibraryScreen() {
     const onKey = (e) => {
       if (e.defaultPrevented || e.altKey) return;
       const t = e.target;
-      if (t instanceof Element && t.closest('input, textarea, select, button, a, label, [contenteditable="true"]')) return;
+      // Arrows mean nothing to a focused ▶/⋯ button, so they keep moving
+      // the selection after a click on one; Space/Enter/Del belong to it.
+      const nav = e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Home' || e.key === 'End';
+      const own = nav ? 'input, textarea, select, [contenteditable="true"]' : 'input, textarea, select, button, a, label, [contenteditable="true"]';
+      if (t instanceof Element && t.closest(own)) return;
       if (document.querySelector('[data-library-overlay]')) return;
       handlersRef.current.key?.(e);
     };
