@@ -1,0 +1,12 @@
+{
+  "name": "audio-splitter-smoke",
+  "private": true,
+  "type": "module",
+  "description": "Headless browser smoke test for the running app (uses the installed Microsoft Edge; no browser download).",
+  "scripts": {
+    "smoke": "node smoke.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.49.0"
+  }
+}
