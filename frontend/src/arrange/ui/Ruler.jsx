@@ -184,7 +184,7 @@ export default memo(function Ruler({ pxPerBeat, beatsPerBar, totalBeats, loop, s
 
   const labels = [];
   for (let i = 0; i < bars; i += labelEvery) labels.push(i);
-  const edgeHit = coarse ? 28 : 12;
+  const edgeHit = coarse ? 44 : 12;
 
   return (
     <div

@@ -11,7 +11,7 @@ import { RETRYABLE, STATUS_LABELS, TERMINAL, jobName } from './format';
 import JobsPane from './JobsPane';
 import { jobsChanged, publishFromTasks } from './jobsStore';
 
-// The result screen pulls in the mixer + wavesurfer: its own chunk,
+// The result screen pulls in the mixer + streaming engine: its own chunk,
 // prefetched while the job is still running.
 const loadResultScreen = () => import('../ResultScreen');
 const ResultScreen = lazy(loadResultScreen);

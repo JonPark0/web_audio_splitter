@@ -1,4 +1,5 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
+import { FiSearch } from 'react-icons/fi';
 import { cancelTask, deleteTask, errorDetail, getTasks } from '../../api';
 import { setQuery, useRoute } from '../../router';
 import usePoll from '../shell/usePoll';
@@ -53,6 +54,12 @@ export default function JobsPane({ className = '', currentId = null }) {
   const searchId = useId();
 
   const [qInput, setQInput] = useState(q);
+  // On a narrow list the search field would take a whole 44 px row of the
+  // phone's first screen; it opens from an icon instead (stays open while it
+  // holds a query).
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchRef = useRef(null);
+  const showSearch = tier !== 'narrow' || searchOpen || !!qInput;
   const [rows, setRows] = useState(null); // null: first load
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -199,7 +206,7 @@ export default function JobsPane({ className = '', currentId = null }) {
     <section ref={rootRef} aria-labelledby="jobs-heading" className={`min-w-0 [--acts:8.25rem] [@media(pointer:coarse)]:[--acts:10.75rem] ${className}`}>
       {/* toolbar sticks under the 48px header */}
       <div className="sticky top-12 z-20 border-b border-line bg-paper pb-1 pt-2">
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-1">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 sm:gap-x-5">
           <h2 id="jobs-heading" className="m-0 text-h4 font-light">
             Jobs
           </h2>
@@ -211,20 +218,38 @@ export default function JobsPane({ className = '', currentId = null }) {
             onChange={(v) => setQuery({ status: v === 'all' ? null : v })}
             className="text-caption sm:text-p"
           />
-          <div className={`flex items-center ${tier === 'narrow' ? 'basis-full' : 'ml-auto w-56'}`}>
-            <label htmlFor={searchId} className="sr-only">
-              Search jobs
-            </label>
-            <input
-              id={searchId}
-              type="search"
-              value={qInput}
-              onChange={(e) => setQInput(e.target.value)}
-              placeholder="Search jobs"
-              autoComplete="off"
-              className="ainput !pb-1"
-            />
-          </div>
+          {!showSearch && (
+            <TextButton
+              aria-label="Search jobs"
+              aria-expanded="false"
+              label=""
+              onClick={() => {
+                setSearchOpen(true);
+                requestAnimationFrame(() => searchRef.current?.focus());
+              }}
+              className="ml-auto h-11 w-11"
+            >
+              <FiSearch className="icon" strokeWidth={1.5} aria-hidden="true" />
+            </TextButton>
+          )}
+          {showSearch && (
+            <div className={`flex items-center ${tier === 'narrow' ? 'basis-full' : 'ml-auto w-56'}`}>
+              <label htmlFor={searchId} className="sr-only">
+                Search jobs
+              </label>
+              <input
+                id={searchId}
+                ref={searchRef}
+                type="search"
+                value={qInput}
+                onChange={(e) => setQInput(e.target.value)}
+                onBlur={() => !qInput && setSearchOpen(false)}
+                placeholder="Search jobs"
+                autoComplete="off"
+                className="ainput !pb-1"
+              />
+            </div>
+          )}
         </div>
         <JobsHeaderRow tier={tier} />
       </div>

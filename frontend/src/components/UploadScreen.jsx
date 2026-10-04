@@ -103,9 +103,6 @@ export default function UploadScreen() {
   const uploading = items.some((i) => isActive(i) || i.state === 'waiting');
   const ready = items.filter((i) => i.state === 'ready');
   const locked = uploading || !!ytBusy;
-  // The server's BS-Roformer step only picks up .wav input (anything else
-  // fails with "No .wav files found"), so stop that before it's queued.
-  const notWav = model === 'bs_roformer' ? ready.filter((i) => !/\.wav$/i.test(i.file.name)) : [];
 
   const takeFiles = (fileList) => {
     const { added, rejected } = addFiles(fileList);
@@ -231,7 +228,7 @@ export default function UploadScreen() {
   if (inputMode === 'youtube') ctaLabel = ytBusy ? 'Fetching...' : autoSplit ? 'Download & split' : 'Download';
   else ctaLabel = uploading ? 'Uploading...' : ready.length > 1 ? `Split ${ready.length} files` : 'Split';
   const canSubmit =
-    inputMode === 'youtube' ? !!youtubeUrl.trim() && !ytBusy : ready.length > 0 && !uploading && notWav.length === 0;
+    inputMode === 'youtube' ? !!youtubeUrl.trim() && !ytBusy : ready.length > 0 && !uploading;
 
   const batchTotal = active ? items.filter((i) => i.batch === active.batch).length : 0;
   const batchIndex = active ? items.filter((i) => i.batch === active.batch && (i.state === 'done' || i.state === 'error')).length + 1 : 0;
@@ -264,13 +261,6 @@ export default function UploadScreen() {
             Open
           </a>
         )}
-      </span>
-    );
-  } else if (inputMode === 'file' && notWav.length) {
-    statusLine = (
-      <span>
-        BS-Roformer reads WAV files only for now — choose a Demucs model for{' '}
-        {notWav.length === 1 ? notWav[0].file.name : `${notWav.length} files`}, or convert to WAV.
       </span>
     );
   } else if (inputMode === 'file') {
@@ -326,7 +316,7 @@ export default function UploadScreen() {
                   while a file is dragged over the page. */}
               <label
                 htmlFor={fileId}
-                className={`group flex h-16 cursor-pointer items-center justify-between gap-4 border-y border-line px-3 transition-colors duration-140 hover:bg-wash peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-ink ${
+                className={`group flex h-12 cursor-pointer items-center justify-between gap-4 border-y sm:h-16 border-line px-3 transition-colors duration-140 hover:bg-wash peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-ink ${
                   dragging ? 'bg-wash' : ''
                 }`}
               >
@@ -334,7 +324,7 @@ export default function UploadScreen() {
                   <span className="[@media(pointer:coarse)]:hidden">Drop audio files or choose</span>
                   <span className="hidden [@media(pointer:coarse)]:inline">Choose audio files</span>
                 </span>
-                <span className="min-w-0 text-right text-caption text-muted">
+                <span className="min-w-0 text-right text-caption leading-tight text-muted">
                   {VIDEO_ACCEPTED ? 'Audio or video' : 'Audio'} · several at once
                 </span>
               </label>

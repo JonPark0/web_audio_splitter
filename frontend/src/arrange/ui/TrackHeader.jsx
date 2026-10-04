@@ -14,8 +14,10 @@ function formatPan(pan) {
 
 /** Mute / solo toggles; `big` = 44 px touch targets. */
 function MuteSolo({ track, set, big, className = '' }) {
+  // `!`: the global coarse-pointer rule makes every .link 44×44, and two of
+  // those plus the name don't fit the phone's 72 px column / 56 px lane.
   const cls = big
-    ? 'min-h-[40px] min-w-[36px] items-center justify-center sm:min-h-[44px] sm:min-w-[44px]'
+    ? 'h-[38px] !min-h-[38px] !min-w-[34px] items-center justify-center sm:h-auto sm:!min-h-[44px] sm:!min-w-[44px]'
     : 'min-w-[16px] [@media(pointer:coarse)]:min-h-[44px] [@media(pointer:coarse)]:min-w-[32px]';
   return (
     <div className={`flex shrink-0 items-center ${big ? 'gap-0' : 'gap-2'} text-caption ${className}`}>

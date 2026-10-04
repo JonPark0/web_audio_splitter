@@ -70,7 +70,7 @@ export default function JobLine({ taskId, result, bpm, songKey, duration, retryi
     songKey,
   ].filter(Boolean);
   return (
-    <div className="flex h-8 min-w-0 items-center gap-x-4 text-caption">
+    <div className="flex h-8 min-w-0 items-center gap-x-4 text-caption [@media(pointer:coarse)]:h-11">
       <h1 className="m-0 min-w-0 max-w-[50%] shrink-0 truncate text-p font-light leading-8" title={result.name}>
         {result.name || 'Stems'}
       </h1>

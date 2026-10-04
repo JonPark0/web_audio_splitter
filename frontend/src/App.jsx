@@ -6,7 +6,7 @@ import useRouteFocus from './components/shell/useRouteFocus';
 import SplitHome from './components/jobs/SplitHome';
 import JobView from './components/jobs/JobView';
 
-// Library and Arrange pull in their own heavy code (wavesurfer, the
+// Library and Arrange pull in their own heavy code (audition, the
 // arrangement engine) that the Split home never needs: separate chunks.
 const LibraryScreen = lazy(() => import('./components/library/LibraryScreen'));
 const ArrangeScreen = lazy(() => import('./arrange/ui/ArrangeScreen'));

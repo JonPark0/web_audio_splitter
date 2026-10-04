@@ -196,9 +196,9 @@ export function getResult(taskId) {
 
 /**
  * Waveform peaks for a stem: { duration, sample_rate, points_per_second,
- * peaks: number[] (0..1, max |sample| per bucket) }. Draw with
- * wavesurfer `peaks: [data.peaks]`, `duration: data.duration` so it streams
- * the audio (Range requests) instead of downloading and decoding the WAV.
+ * peaks: number[] (0..1, max |sample| per bucket) }. The mixer draws these
+ * instead of downloading and decoding whole WAVs (it streams the audio in
+ * short Range-request chunks for playback).
  * resolution: points per second, 10..1000 (100 is plenty at "fit").
  */
 export function getPeaks(taskId, trackName, variant = 'original', resolution = 100) {
