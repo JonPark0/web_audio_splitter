@@ -34,6 +34,7 @@ from collections import deque
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 
+import jobs
 from infer_cli import MARKER
 
 BASE_DIR = Path(__file__).parent
@@ -117,20 +118,23 @@ def _run_batch(cmd, pairs, label, on_stem_start) -> None:
     # stderr is merged into stdout so a single pipe is drained line by line —
     # reading two pipes sequentially could deadlock once the unread one fills.
     process = subprocess.Popen(
-        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
+        start_new_session=True,  # own process group, so cancelling kills its children too
     )
     tail = deque(maxlen=ERROR_TAIL_LINES)
     current = None
-    for line in process.stdout:
-        if line.startswith(MARKER):
-            _, event, index = line.split()
-            if event == "start":
-                current = int(index)
-                if on_stem_start:
-                    on_stem_start(current)
-        else:
-            tail.append(line)
-    process.wait()
+    with jobs.register(process):
+        for line in process.stdout:
+            if line.startswith(MARKER):
+                _, event, index = line.split()
+                if event == "start":
+                    current = int(index)
+                    if on_stem_start:
+                        on_stem_start(current)
+            else:
+                tail.append(line)
+        process.wait()
+    jobs.check_cancelled()  # raises jobs.JobCancelled
 
     stem = pairs[current][0].stem if current is not None else None
     if process.returncode != 0:

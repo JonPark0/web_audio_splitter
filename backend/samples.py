@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import uuid
+from json import dumps as _json_dumps
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -16,14 +17,20 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
 import analysis
+import numpy as np
+import peaks
 from db import session_scope
 from models import Clip, Project, ProjectTrack, Sample
 from storage import IMMUTABLE_CACHE_HEADERS, SAMPLES_DIR, track_path
+from songs import ensure_song_analysis
 from task_store import get_task, parse_id
 
 router = APIRouter(prefix="/samples", tags=["samples"])
 
 MIN_SAMPLE_SECONDS = 0.05
+ZERO_CROSSING_WINDOW_SEC = 0.01  # how far a boundary may move to find a zero crossing
+NORMALIZE_PEAK = 10 ** (-1 / 20)  # -1 dBFS
+PEAKS_DIR = SAMPLES_DIR / "peaks"
 # Time-stretched / pitch-shifted copies for the arrangement, keyed by source
 # BPM, target BPM and semitones (see render_sample).
 RENDER_DIR = SAMPLES_DIR / "renders"
@@ -40,6 +47,14 @@ class SampleCreate(BaseModel):
     end_sec: float = Field(gt=0)
     name: Optional[str] = None
     tags: list[str] = []
+    # Processing applied to the saved audio, in this order: boundaries moved
+    # to the nearest zero crossing (avoids clicks at the cut), reverse,
+    # normalize the peak to NORMALIZE_PEAK, then linear fades.
+    snap_to_zero: bool = False
+    reverse: bool = False
+    normalize: bool = False
+    fade_in_ms: float = Field(default=0, ge=0, le=10000)
+    fade_out_ms: float = Field(default=0, ge=0, le=10000)
 
 
 class SampleUpdate(BaseModel):
@@ -140,9 +155,12 @@ def run_analysis(sample_id: str) -> None:
         if sample is None:
             return
         path = sample.file_path
+        source_task_id = sample.source_task_id
 
     try:
-        result = analysis.analyze_file(path)
+        source = get_task(str(source_task_id)) if source_task_id else None
+        bpm_hint = ensure_song_analysis(source)["bpm"] if source else None
+        result = analysis.analyze_file(path, bpm_hint=bpm_hint)
         fields = {"bpm_detected": result["bpm"], "key_detected": result["key"], "analysis_status": "done"}
     except Exception as e:
         print(f"Analysis failed for sample {sample_id}: {e}")
@@ -153,6 +171,47 @@ def run_analysis(sample_id: str) -> None:
         if sample is not None:  # may have been deleted meanwhile
             for k, v in fields.items():
                 setattr(sample, k, v)
+
+
+def _snap_to_zero_crossings(src: Path, info, start: int, stop: int) -> tuple[int, int]:
+    """Move each boundary to the nearest sign change of the mono sum within
+    ZERO_CROSSING_WINDOW_SEC, so the cut doesn't click."""
+    window = int(ZERO_CROSSING_WINDOW_SEC * info.samplerate)
+
+    def nearest(frame: int) -> int:
+        lo, hi = max(0, frame - window), min(info.frames, frame + window)
+        if hi - lo < 2:
+            return frame
+        mono = sf.read(str(src), start=lo, stop=hi, always_2d=True)[0].mean(axis=1)
+        crossings = np.nonzero(np.signbit(mono[:-1]) != np.signbit(mono[1:]))[0] + lo + 1
+        return int(crossings[np.argmin(np.abs(crossings - frame))]) if crossings.size else frame
+
+    new_start, new_stop = nearest(start), nearest(stop)
+    return (new_start, new_stop) if new_stop - new_start > 0 else (start, stop)
+
+
+def _process(data, sr: int, opts: SampleCreate):
+    if opts.reverse:
+        data = data[::-1]
+    if opts.normalize:
+        peak = float(np.abs(data).max()) if data.size else 0.0
+        if peak > 0:
+            data = data * (NORMALIZE_PEAK / peak)
+    n = len(data)
+    fade_in = min(n, int(opts.fade_in_ms / 1000 * sr))
+    fade_out = min(n, int(opts.fade_out_ms / 1000 * sr))
+    if fade_in or fade_out:
+        data = np.array(data, dtype=np.float64, copy=True)
+        if fade_in:
+            data[:fade_in] *= np.linspace(0.0, 1.0, fade_in, endpoint=False)[:, None]
+        if fade_out:
+            data[n - fade_out:] *= np.linspace(1.0, 0.0, fade_out)[:, None]
+    return data
+
+
+def _safe_filename(name: str, fallback: str = "sample") -> str:
+    cleaned = "".join(c if c.isalnum() or c in " ._-()" else "_" for c in name).strip(" .")
+    return cleaned or fallback
 
 
 @router.post("", status_code=201)
@@ -174,7 +233,11 @@ def create_sample(body: SampleCreate, background_tasks: BackgroundTasks):
     if stop - start < MIN_SAMPLE_SECONDS * info.samplerate:
         raise HTTPException(status_code=400, detail="Selection is empty or too short")
 
+    if body.snap_to_zero:
+        start, stop = _snap_to_zero_crossings(src, info, start, stop)
+
     data, sr = sf.read(str(src), start=start, stop=stop, always_2d=True)
+    data = _process(data, sr, body)
     sample_id = uuid.uuid4()
     out_path = SAMPLES_DIR / f"{sample_id}.wav"
     subtype = info.subtype if sf.check_format("WAV", info.subtype) else "FLOAT"
@@ -345,6 +408,8 @@ def delete_sample(sample_id: str):
 def _drop_renders(sample_id: uuid.UUID) -> None:
     for f in RENDER_DIR.glob(f"{sample_id}_*.wav"):
         f.unlink(missing_ok=True)
+    for f in PEAKS_DIR.glob(f"{sample_id}_*.json"):
+        f.unlink(missing_ok=True)
 
 
 @router.get("/{sample_id}/render")
@@ -392,7 +457,23 @@ def render_sample(
 @router.get("/{sample_id}/audio")
 def sample_audio(sample_id: str):
     with session_scope() as session:
+        sample = _get_or_404(session, sample_id)
+        path, name = Path(sample.file_path), sample.name
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Sample audio missing")
+    # Named after the sample, for downloads; "inline" so <audio> still plays it.
+    return FileResponse(
+        path, media_type="audio/wav", headers=IMMUTABLE_CACHE_HEADERS,
+        filename=f"{_safe_filename(name)}.wav", content_disposition_type="inline",
+    )
+
+
+@router.get("/{sample_id}/peaks")
+def sample_peaks(sample_id: str, points: int = Query(default=400, ge=16, le=4000)):
+    """Waveform overview of the whole sample in `points` buckets (see peaks.py)."""
+    with session_scope() as session:
         path = Path(_get_or_404(session, sample_id).file_path)
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Sample audio missing")
-    return FileResponse(path, media_type="audio/wav", headers=IMMUTABLE_CACHE_HEADERS)
+    data = peaks.cached(path, PEAKS_DIR / f"{path.stem}_{points}.json", total_points=points)
+    return Response(content=_json_dumps(data, separators=(',', ':')), media_type="application/json", headers=IMMUTABLE_CACHE_HEADERS)

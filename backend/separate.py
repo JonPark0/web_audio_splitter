@@ -10,8 +10,9 @@ already key off `task_info["model"]` to build — so none of that code needs
 to know which engine actually produced the stems.
 """
 import shutil
-import subprocess
 from pathlib import Path
+
+import jobs
 
 DEMUCS_MODELS = {
     "htdemucs", "htdemucs_ft", "htdemucs_6s", "hdemucs_mmi",
@@ -47,7 +48,7 @@ def _separate_demucs(file_path: Path, out_dir: Path, model: str, shifts: int) ->
     if shifts > 0:
         cmd.extend(["--shifts", str(shifts)])
 
-    process = subprocess.run(cmd, capture_output=True, text=True)
+    process = jobs.run(cmd)  # cancellable; raises jobs.JobCancelled
     if process.returncode != 0:
         raise SeparationError(f"Demucs separation failed: {process.stderr[-2000:]}")
 
@@ -76,7 +77,12 @@ def _separate_bs_roformer(file_path: Path, out_dir: Path, device: str) -> None:
         "--input_folder", str(scratch_in),
         "--store_dir", str(scratch_out),
     ]
-    process = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        process = jobs.run(cmd)  # cancellable; raises jobs.JobCancelled
+    except jobs.JobCancelled:
+        shutil.rmtree(scratch_in, ignore_errors=True)
+        shutil.rmtree(scratch_out, ignore_errors=True)
+        raise
 
     if process.returncode != 0:
         shutil.rmtree(scratch_in, ignore_errors=True)

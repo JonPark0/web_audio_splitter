@@ -8,7 +8,9 @@ UPLOAD_DIR = Path("media/uploads")
 OUTPUT_DIR = Path("media/separated")
 SPECTROGRAM_DIR = Path("media/spectrograms")
 SAMPLES_DIR = Path("media/samples")
-for _d in (UPLOAD_DIR, OUTPUT_DIR, SPECTROGRAM_DIR, SAMPLES_DIR):
+PEAKS_DIR = Path("media/peaks")
+TMP_DIR = Path("media/tmp")
+for _d in (UPLOAD_DIR, OUTPUT_DIR, SPECTROGRAM_DIR, SAMPLES_DIR, PEAKS_DIR, TMP_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 
 RECOVERED_SUBDIR = "recovered"

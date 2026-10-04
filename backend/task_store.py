@@ -21,6 +21,8 @@ COLUMN_FIELDS = {"kind", "status", "model", "recover", "recovery_model", "source
 # restart kills that thread, so rows left in these states would otherwise
 # spin forever on the frontend.
 IN_FLIGHT_STATUSES = ("queued", "downloading", "processing", "restoring")
+# Of those, the ones that need a live worker; queued jobs can be resubmitted.
+RUNNING_STATUSES = ("downloading", "processing", "restoring")
 
 
 def parse_id(task_id: str) -> Optional[uuid.UUID]:
@@ -100,12 +102,19 @@ def list_tasks_older_than(days: float) -> list[dict]:
         return [_to_dict(t) for t in rows]
 
 
+def list_queued_tasks() -> list[dict]:
+    """Jobs waiting to run, oldest first."""
+    with session_scope() as session:
+        rows = session.scalars(select(Task).where(Task.status == "queued").order_by(Task.created_at)).all()
+        return [_to_dict(t) for t in rows]
+
+
 def fail_interrupted_tasks() -> int:
-    """Mark jobs orphaned by a restart as failed; returns how many."""
+    """Mark jobs whose worker died with a restart as failed; returns how many."""
     with session_scope() as session:
         result = session.execute(
             update(Task)
-            .where(Task.status.in_(IN_FLIGHT_STATUSES))
+            .where(Task.status.in_(RUNNING_STATUSES))
             .values(
                 status="failed",
                 meta=Task.meta.op("||")(cast({"error": "Interrupted by a server restart"}, JSONB)),

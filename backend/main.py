@@ -1,27 +1,36 @@
 import asyncio
+import io
+import json
 import os
+import queue
+import threading
 import shutil
 import uuid
 import subprocess
+import zipfile
 from contextlib import asynccontextmanager
 from pathlib import Path
-from fastapi import FastAPI, UploadFile, File, BackgroundTasks, HTTPException, Form
-from fastapi.responses import FileResponse, Response
+from typing import Literal
+from fastapi import FastAPI, UploadFile, File, BackgroundTasks, HTTPException, Form, Query
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import yt_dlp
 
+import jobs
+import peaks
 import projects
 import samples
 from restore import restore_stems, RestoreError, SUPPORTED_MODELS, DEFAULT_MODEL
 from separate import separate_audio, SeparationError, DERIVED_STEMS, DEMUCS_MODELS, BS_ROFORMER_MODEL
+from songs import ensure_song_analysis, song_analysis_or_start
 from storage import (
-    IMMUTABLE_CACHE_HEADERS, OUTPUT_DIR, RECOVERED_SUBDIR, SPECTROGRAM_DIR, UPLOAD_DIR,
-    stems_dir, track_path,
+    IMMUTABLE_CACHE_HEADERS, OUTPUT_DIR, PEAKS_DIR, RECOVERED_SUBDIR, SPECTROGRAM_DIR,
+    UPLOAD_DIR, VARIANTS, stems_dir, track_path,
 )
 from task_store import (
     IN_FLIGHT_STATUSES, create_task, delete_task_row, fail_interrupted_tasks, get_task,
-    list_tasks, list_tasks_older_than, update_task,
+    list_queued_tasks, list_tasks, list_tasks_older_than, update_task,
 )
 
 SEPARATION_MODELS = DEMUCS_MODELS | {BS_ROFORMER_MODEL}
@@ -30,6 +39,8 @@ SEPARATION_MODELS = DEMUCS_MODELS | {BS_ROFORMER_MODEL}
 # 0 / unset = keep everything.
 MEDIA_RETENTION_DAYS = float(os.getenv("MEDIA_RETENTION_DAYS", "0") or 0)
 RETENTION_CHECK_SECONDS = 6 * 3600
+# Upload size limit (the 30-minute duration limit applies to uploads and YouTube alike).
+MAX_UPLOAD_MB = float(os.getenv("MAX_UPLOAD_MB", "1024") or 1024)
 
 
 @asynccontextmanager
@@ -39,6 +50,13 @@ async def lifespan(app: FastAPI):
     interrupted = fail_interrupted_tasks()
     if interrupted:
         print(f"Marked {interrupted} interrupted task(s) as failed")
+    # Queued jobs never started, so they can simply run now (oldest first).
+    jobs.start()
+    for task in list_queued_tasks():
+        if task.get("file_path") and Path(task["file_path"]).is_file():
+            enqueue(task["id"], Path(task["file_path"]), task["model"], task["recover"], task["recovery_model"])
+        else:
+            update_task(task["id"], status="failed", error="Source audio missing after a restart")
     cleanup = asyncio.create_task(_retention_loop()) if MEDIA_RETENTION_DAYS > 0 else None
     yield
     if cleanup:
@@ -64,6 +82,7 @@ def remove_task(task: dict) -> None:
         Path(file_path).unlink(missing_ok=True)
     shutil.rmtree(stems_dir(task), ignore_errors=True)
     shutil.rmtree(SPECTROGRAM_DIR / task["id"], ignore_errors=True)
+    shutil.rmtree(PEAKS_DIR / task["id"], ignore_errors=True)
     delete_task_row(task["id"])
 
 
@@ -115,6 +134,15 @@ def set_progress(task_id: str, step: str, step_index: int, step_total: int, curr
 
 
 def process_audio(task_id: str, file_path: Path, model: str, recover: bool = False, recovery_model: str = DEFAULT_MODEL):
+    """The job (runs on a jobs.py worker): separate, analyse the song, then
+    optionally restore each stem. Cancellation surfaces as jobs.JobCancelled."""
+    try:
+        _process_audio(task_id, file_path, model, recover, recovery_model)
+    except jobs.JobCancelled:
+        update_task(task_id, status="cancelled", error="Cancelled")
+
+
+def _process_audio(task_id: str, file_path: Path, model: str, recover: bool, recovery_model: str):
     update_task(task_id, status="processing", recover=recover, recovery_model=recovery_model)
 
     # Step budget: 1 separation step, plus 1 step per stem when recovering.
@@ -134,6 +162,14 @@ def process_audio(task_id: str, file_path: Path, model: str, recover: bool = Fal
             print(f"Error processing {task_id}: {e}")
             update_task(task_id, status="failed", error="Separation failed")
             return
+
+        # Tempo/key of the whole song: shown on the result screen and
+        # inherited by samples cut from it. A few seconds; failures are
+        # logged and left as None.
+        task_now = get_task(task_id)
+        if task_now:
+            ensure_song_analysis(task_now)
+        jobs.check_cancelled()
 
         if not recover:
             update_task(task_id, status="completed")
@@ -171,9 +207,48 @@ def process_audio(task_id: str, file_path: Path, model: str, recover: bool = Fal
         set_progress(task_id, "restoring", len(stems), len(stems))
         update_task(task_id, status="completed")
 
+    except jobs.JobCancelled:
+        raise
     except Exception as e:
         print(f"Exception for {task_id}: {e}")
         update_task(task_id, status="failed", error=str(e))
+
+
+def probe_audio(path: Path) -> float:
+    """Duration in seconds of an audio file; HTTP 400 if it isn't one."""
+    cmd = [
+        "ffprobe", "-v", "error", "-select_streams", "a:0",
+        "-show_entries", "stream=codec_type:format=duration", "-of", "json", str(path),
+    ]
+    process = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        info = json.loads(process.stdout or "{}")
+    except ValueError:
+        info = {}
+    if process.returncode != 0 or not info.get("streams"):
+        raise HTTPException(status_code=400, detail="Unsupported or unreadable audio file")
+    try:
+        return float(info.get("format", {}).get("duration") or 0)
+    except ValueError:
+        return 0.0
+
+
+def validate_settings(model: str, recover: bool, recovery_model: str) -> None:
+    if model not in SEPARATION_MODELS:
+        raise HTTPException(status_code=400, detail=f"Unknown separation model '{model}'")
+    if recover and recovery_model.lower() not in SUPPORTED_MODELS:
+        raise HTTPException(status_code=400, detail=f"Unknown recovery_model '{recovery_model}'")
+
+
+def enqueue(task_id: str, file_path: Path, model: str, recover: bool, recovery_model: str) -> None:
+    jobs.submit(task_id, process_audio, file_path, model, recover, recovery_model)
+
+
+def song_label(task: dict) -> str:
+    """File-name-safe song name for downloads."""
+    name = task.get("title") or Path(task.get("source_name") or "song").stem
+    cleaned = "".join(c if c.isalnum() or c in " ._-()" else "_" for c in name).strip(" .")
+    return cleaned[:120] or "song"
 
 
 def download_youtube_audio(task_id: str, url: str):
@@ -220,22 +295,35 @@ def download_youtube_audio(task_id: str, url: str):
 # every other request (e.g. status polling).
 @app.post("/upload")
 def upload_audio(
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     model: str = Form("htdemucs"),
     recover: bool = Form(False),
     recovery_model: str = Form(DEFAULT_MODEL),
 ):
-    if recover and recovery_model.lower() not in SUPPORTED_MODELS:
-        raise HTTPException(status_code=400, detail=f"Unknown recovery_model '{recovery_model}'")
+    validate_settings(model, recover, recovery_model)
 
     task_id = str(uuid.uuid4())
-    file_ext = Path(file.filename).suffix
+    file_ext = Path(file.filename or "").suffix
     saved_filename = f"{task_id}{file_ext}"
     file_path = UPLOAD_DIR / saved_filename
 
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
+
+    # Reject non-audio and over-long files now, instead of a job that fails
+    # later with a generic "Separation failed".
+    try:
+        if file_path.stat().st_size > MAX_UPLOAD_MB * 1024 * 1024:
+            raise HTTPException(status_code=413, detail=f"File is larger than {MAX_UPLOAD_MB:g} MB")
+        duration = probe_audio(file_path)
+        if duration > MAX_DURATION_SECONDS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Audio exceeds maximum duration ({MAX_DURATION_SECONDS // 60} minutes)",
+            )
+    except HTTPException:
+        file_path.unlink(missing_ok=True)
+        raise
 
     create_task(
         task_id,
@@ -246,8 +334,10 @@ def upload_audio(
         recovery_model=recovery_model,
         source_name=file.filename,
         file_path=str(file_path),
+        duration=duration,
+        duration_formatted=format_duration(int(duration)),
     )
-    background_tasks.add_task(process_audio, task_id, file_path, model, recover, recovery_model)
+    enqueue(task_id, file_path, model, recover, recovery_model)
 
     return {"task_id": task_id}
 
@@ -313,7 +403,7 @@ def youtube_download(
 
 
 @app.post("/youtube/confirm/{task_id}")
-def youtube_confirm(task_id: str, background_tasks: BackgroundTasks):
+def youtube_confirm(task_id: str):
     """User confirms the downloaded audio — triggers Demucs processing."""
     task_info = get_task(task_id)
     if not task_info:
@@ -326,7 +416,7 @@ def youtube_confirm(task_id: str, background_tasks: BackgroundTasks):
     recover = task_info.get("recover", False)
     recovery_model = task_info.get("recovery_model", DEFAULT_MODEL)
     update_task(task_id, status="queued")
-    background_tasks.add_task(process_audio, task_id, file_path, model, recover, recovery_model)
+    enqueue(task_id, file_path, model, recover, recovery_model)
     return {"status": "confirmed", "task_id": task_id}
 
 
@@ -362,6 +452,10 @@ def get_tasks(limit: int = 50):
                 "created_at": t["created_at"],
                 "error": t.get("error"),
                 "retry_of": t.get("retry_of"),
+                "queue_position": jobs.queue_position(t["id"]) if t["status"] == "queued" else None,
+                "duration": t.get("duration"),
+                "bpm": t.get("bpm"),
+                "key": t.get("song_key"),
             }
             for t in list_tasks(min(max(limit, 1), 200))
         ]
@@ -375,16 +469,13 @@ class RetryRequest(BaseModel):
 
 
 @app.post("/tasks/{task_id}/retry", status_code=201)
-def retry_task(task_id: str, body: RetryRequest, background_tasks: BackgroundTasks):
+def retry_task(task_id: str, body: RetryRequest):
     """Run a finished job's source audio again with other settings, as a new
     job; the original job and its stems are kept."""
     task = get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    if body.model not in SEPARATION_MODELS:
-        raise HTTPException(status_code=400, detail=f"Unknown model '{body.model}'")
-    if body.recover and body.recovery_model.lower() not in SUPPORTED_MODELS:
-        raise HTTPException(status_code=400, detail=f"Unknown recovery_model '{body.recovery_model}'")
+    validate_settings(body.model, body.recover, body.recovery_model)
     src = task.get("file_path")
     if task["status"] in ("downloading", "download_failed") or not src or not Path(src).is_file():
         raise HTTPException(status_code=400, detail="The source audio for this job is no longer available")
@@ -399,7 +490,11 @@ def retry_task(task_id: str, body: RetryRequest, background_tasks: BackgroundTas
     except OSError:
         shutil.copy2(src, new_path)
 
-    inherited = {k: task[k] for k in ("title", "thumbnail", "duration", "duration_formatted") if k in task}
+    inherited = {
+        k: task[k]
+        for k in ("title", "thumbnail", "duration", "duration_formatted", "bpm", "song_key")
+        if k in task
+    }
     create_task(
         new_id,
         kind=task["kind"],
@@ -412,8 +507,27 @@ def retry_task(task_id: str, body: RetryRequest, background_tasks: BackgroundTas
         retry_of=task["id"],
         **inherited,
     )
-    background_tasks.add_task(process_audio, new_id, new_path, body.model, body.recover, body.recovery_model)
+    enqueue(new_id, new_path, body.model, body.recover, body.recovery_model)
     return {"task_id": new_id}
+
+
+@app.post("/tasks/{task_id}/cancel")
+def cancel_task(task_id: str):
+    """Stop a queued or running job. Stems written so far are kept; the job
+    ends as "cancelled" and can be retried or deleted."""
+    task = get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task["status"] == "downloading":
+        raise HTTPException(status_code=409, detail="A YouTube download can't be cancelled; delete the job once it finishes")
+    if task["status"] not in IN_FLIGHT_STATUSES:
+        raise HTTPException(status_code=409, detail="This job is not running")
+    outcome = jobs.cancel(task_id)
+    if outcome in ("dequeued", "not_found"):
+        # Not on a worker (still waiting, or orphaned): it ends right here.
+        update_task(task_id, status="cancelled", error="Cancelled")
+    # "killed": the worker records "cancelled" once its subprocess exits.
+    return {"status": "cancelled" if outcome != "killed" else "cancelling"}
 
 
 @app.delete("/tasks/{task_id}", status_code=204)
@@ -436,10 +550,12 @@ def get_status(task_id: str):
     for key in (
         "error", "title", "thumbnail", "duration", "duration_formatted",
         "step", "step_index", "step_total", "current_stem",
-        "recover", "recovery_model",
+        "recover", "recovery_model", "bpm",
     ):
         if key in task_info:
             response[key] = task_info[key]
+    if task_info["status"] == "queued":
+        response["queue_position"] = jobs.queue_position(task_id)
     return response
 
 
@@ -470,7 +586,15 @@ def get_result(task_id: str):
         "name": task_info.get("title") or task_info.get("source_name"),
         "model": task_info["model"],
         "recover": task_info.get("recover", False),
+        # Jobs from before song analysis existed get analysed on first open.
+        **_song_fields(task_info),
+        "duration": task_info.get("duration"),
     }
+
+
+def _song_fields(task: dict) -> dict:
+    song = song_analysis_or_start(task)
+    return {"bpm": song["bpm"], "key": song["key"]}
 
 
 def _resolve_track_path(task_id: str, track_name: str, variant: str) -> Path:
@@ -488,7 +612,89 @@ def _resolve_track_path(task_id: str, track_name: str, variant: str) -> Path:
 @app.get("/download/{task_id}/{track_name}")
 def download_track(task_id: str, track_name: str, variant: str = "original"):
     file_path = _resolve_track_path(task_id, track_name, variant)
-    return FileResponse(file_path, headers=IMMUTABLE_CACHE_HEADERS)
+    # "<song>-<stem>[-recovered].wav" for downloads; "inline" so the mixer's
+    # <audio> elements still stream it (Range requests work as before).
+    return FileResponse(
+        file_path, media_type="audio/wav", headers=IMMUTABLE_CACHE_HEADERS,
+        filename=_stem_filename(get_task(task_id), track_name, variant),
+        content_disposition_type="inline",
+    )
+
+
+def _stem_filename(task: dict, track_name: str, variant: str) -> str:
+    suffix = "-recovered" if variant == "recovered" else ""
+    return f"{song_label(task)}-{Path(track_name).stem}{suffix}.wav"
+
+
+@app.get("/peaks/{task_id}/{track_name}")
+def get_peaks(
+    task_id: str,
+    track_name: str,
+    variant: str = "original",
+    resolution: int = Query(default=100, ge=10, le=peaks.MAX_POINTS_PER_SECOND),
+):
+    """Waveform peaks for a stem at `resolution` points per second, so the
+    mixer can draw without downloading and decoding the WAV (see peaks.py).
+    Pass them to wavesurfer as `peaks: [data.peaks]`, `duration: data.duration`."""
+    file_path = _resolve_track_path(task_id, track_name, variant)
+    cache = PEAKS_DIR / task_id / variant / f"{Path(track_name).stem}@{resolution}.json"
+    data = peaks.cached(file_path, cache, points_per_second=resolution)
+    return Response(content=json.dumps(data, separators=(",", ":")), media_type="application/json",
+                    headers=IMMUTABLE_CACHE_HEADERS)
+
+
+@app.get("/tasks/{task_id}/stems.zip")
+def download_all_stems(task_id: str, variant: Literal["original", "recovered"] = "original"):
+    """Every stem of a job (one variant) in a single zip, files named like
+    the single-stem downloads. Stored, not deflated: WAV barely compresses."""
+    task = get_task(task_id)
+    if not task or task["status"] != "completed":
+        raise HTTPException(status_code=404, detail="Task not found or not completed")
+    base = stems_dir(task) / RECOVERED_SUBDIR if variant == "recovered" else stems_dir(task)
+    stems = sorted(base.glob("*.wav"))
+    if not stems:
+        raise HTTPException(status_code=404, detail=f"No {variant} stems for this job")
+    suffix = "-recovered" if variant == "recovered" else ""
+    entries = [(stem, _stem_filename(task, stem.name, variant)) for stem in stems]
+    # Streamed while it's written, so the download starts at once instead of
+    # after building a few hundred MB on disk (26 s for 4 stems of a song).
+    return StreamingResponse(
+        _zip_stream(entries), media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{song_label(task)}-stems{suffix}.zip"'},
+    )
+
+
+class _QueueWriter(io.RawIOBase):
+    """Write end of a bounded queue, for zipfile to write into."""
+
+    def __init__(self, q: "queue.Queue"):
+        self.q = q
+
+    def writable(self):
+        return True
+
+    def write(self, b):
+        self.q.put(bytes(b))
+        return len(b)
+
+
+def _zip_stream(entries):
+    q: queue.Queue = queue.Queue(maxsize=16)  # ~16 MB of backpressure
+
+    def produce():
+        try:
+            # An unseekable target makes zipfile write data descriptors,
+            # which every unzip tool understands.
+            with zipfile.ZipFile(_QueueWriter(q), "w", compression=zipfile.ZIP_STORED) as zf:
+                for path, arcname in entries:
+                    with open(path, "rb") as src, zf.open(arcname, "w", force_zip64=True) as dst:
+                        shutil.copyfileobj(src, dst, 1024 * 1024)
+        finally:
+            q.put(None)
+
+    threading.Thread(target=produce, daemon=True).start()
+    while (chunk := q.get()) is not None:
+        yield chunk
 
 
 @app.get("/spectrogram/{task_id}/{track_name}")
