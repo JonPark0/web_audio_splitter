@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import cast, delete, select, update
+from sqlalchemy import cast, delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import JSONB
 
 from db import session_scope
@@ -44,6 +44,7 @@ def _to_dict(task: Task) -> dict:
         source_name=task.source_name,
         file_path=task.file_path,
         created_at=task.created_at.isoformat() if task.created_at else None,
+        updated_at=task.updated_at.isoformat() if task.updated_at else None,
     )
     return data
 
@@ -80,10 +81,32 @@ def update_task(task_id: str, **fields) -> None:
         session.execute(update(Task).where(Task.id == uuid.UUID(task_id)).values(**values))
 
 
-def list_tasks(limit: int = 50) -> list[dict]:
+def list_tasks(limit: int = 50, before: Optional[str] = None, q: Optional[str] = None,
+               statuses: Optional[list[str]] = None) -> list[dict]:
+    """Newest first. `before` (an ISO created_at from a previous page) pages
+    back; `q` matches the name (file name or YouTube title); `statuses`
+    filters."""
+    stmt = select(Task)
+    if before:
+        try:
+            stmt = stmt.where(Task.created_at < datetime.fromisoformat(before))
+        except ValueError:
+            pass
+    if q:
+        stmt = stmt.where(or_(
+            Task.source_name.icontains(q, autoescape=True),
+            Task.meta["title"].astext.icontains(q, autoescape=True),
+        ))
+    if statuses:
+        stmt = stmt.where(Task.status.in_(statuses))
     with session_scope() as session:
-        rows = session.scalars(select(Task).order_by(Task.created_at.desc()).limit(limit)).all()
+        rows = session.scalars(stmt.order_by(Task.created_at.desc()).limit(limit)).all()
         return [_to_dict(t) for t in rows]
+
+
+def count_in_flight() -> int:
+    with session_scope() as session:
+        return session.scalar(select(func.count()).select_from(Task).where(Task.status.in_(IN_FLIGHT_STATUSES))) or 0
 
 
 def delete_task_row(task_id: str) -> None:

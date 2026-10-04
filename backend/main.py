@@ -9,6 +9,7 @@ import uuid
 import subprocess
 import zipfile
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 from fastapi import FastAPI, UploadFile, File, BackgroundTasks, HTTPException, Form, Query
@@ -22,14 +23,16 @@ import peaks
 import projects
 import samples
 from restore import restore_stems, RestoreError, SUPPORTED_MODELS, DEFAULT_MODEL
-from separate import separate_audio, SeparationError, DERIVED_STEMS, DEMUCS_MODELS, BS_ROFORMER_MODEL
+from separate import (
+    separate_audio, SeparationError, DERIVED_STEMS, DEMUCS_MODELS, BS_ROFORMER_MODEL, describe_failure,
+)
 from songs import ensure_song_analysis, song_analysis_or_start
 from storage import (
     IMMUTABLE_CACHE_HEADERS, OUTPUT_DIR, PEAKS_DIR, RECOVERED_SUBDIR, SPECTROGRAM_DIR,
     UPLOAD_DIR, VARIANTS, stems_dir, track_path,
 )
 from task_store import (
-    IN_FLIGHT_STATUSES, create_task, delete_task_row, fail_interrupted_tasks, get_task,
+    IN_FLIGHT_STATUSES, count_in_flight, create_task, delete_task_row, fail_interrupted_tasks, get_task,
     list_queued_tasks, list_tasks, list_tasks_older_than, update_task,
 )
 
@@ -136,10 +139,17 @@ def set_progress(task_id: str, step: str, step_index: int, step_total: int, curr
 def process_audio(task_id: str, file_path: Path, model: str, recover: bool = False, recovery_model: str = DEFAULT_MODEL):
     """The job (runs on a jobs.py worker): separate, analyse the song, then
     optionally restore each stem. Cancellation surfaces as jobs.JobCancelled."""
+    update_task(task_id, started_at=_now_iso())
     try:
         _process_audio(task_id, file_path, model, recover, recovery_model)
     except jobs.JobCancelled:
         update_task(task_id, status="cancelled", error="Cancelled")
+    finally:
+        update_task(task_id, finished_at=_now_iso())
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _process_audio(task_id: str, file_path: Path, model: str, recover: bool, recovery_model: str):
@@ -160,7 +170,7 @@ def _process_audio(task_id: str, file_path: Path, model: str, recover: bool, rec
             separate_audio(file_path, OUTPUT_DIR, model, shifts, recovery_device())
         except SeparationError as e:
             print(f"Error processing {task_id}: {e}")
-            update_task(task_id, status="failed", error="Separation failed")
+            update_task(task_id, status="failed", error=f"Separation failed: {describe_failure(str(e))}")
             return
 
         # Tempo/key of the whole song: shown on the result screen and
@@ -251,9 +261,22 @@ def song_label(task: dict) -> str:
     return cleaned[:120] or "song"
 
 
-def download_youtube_audio(task_id: str, url: str):
-    """Background task: download audio from YouTube URL."""
+def download_youtube_audio(task_id: str, url: str, auto_split: bool = False):
+    """Background task: download audio from YouTube URL; with auto_split the
+    job is queued for separation as soon as the audio is in."""
     output_path = UPLOAD_DIR / f"{task_id}.%(ext)s"
+    last_percent = [-1]
+
+    def progress(d):
+        # Throttled to whole 5 % steps: each update is a DB write.
+        if d.get("status") == "downloading":
+            total = d.get("total_bytes") or d.get("total_bytes_estimate")
+            if total:
+                percent = int(d.get("downloaded_bytes", 0) * 100 / total) // 5 * 5
+                if percent != last_percent[0]:
+                    last_percent[0] = percent
+                    update_task(task_id, download_percent=percent)
+
     ydl_opts = {
         "format": "bestaudio/best",
         "outtmpl": str(output_path),
@@ -263,6 +286,9 @@ def download_youtube_audio(task_id: str, url: str):
         }],
         "quiet": True,
         "no_warnings": True,
+        # A link copied from a Mix/playlist carries &list=…: only that video.
+        "noplaylist": True,
+        "progress_hooks": [progress],
     }
 
     try:
@@ -280,8 +306,12 @@ def download_youtube_audio(task_id: str, url: str):
             )
 
         wav_path = UPLOAD_DIR / f"{task_id}.wav"
-        if wav_path.exists():
-            update_task(task_id, file_path=str(wav_path), status="downloaded")
+        if wav_path.exists() and auto_split:
+            task = get_task(task_id)
+            update_task(task_id, file_path=str(wav_path), status="queued", download_percent=100)
+            enqueue(task_id, wav_path, task["model"], task["recover"], task["recovery_model"])
+        elif wav_path.exists():
+            update_task(task_id, file_path=str(wav_path), status="downloaded", download_percent=100)
         else:
             update_task(task_id, status="download_failed", error="Audio conversion failed")
     except Exception as e:
@@ -349,6 +379,7 @@ def youtube_info(url: str = Form(...)):
         "quiet": True,
         "no_warnings": True,
         "skip_download": True,
+        "noplaylist": True,
     }
 
     try:
@@ -357,6 +388,8 @@ def youtube_info(url: str = Form(...)):
     except yt_dlp.utils.DownloadError as e:
         raise HTTPException(status_code=400, detail="Invalid YouTube URL or video unavailable")
 
+    if info.get("_type") == "playlist":
+        raise HTTPException(status_code=400, detail="That is a playlist link; paste a single video's link")
     if info.get("is_live"):
         raise HTTPException(status_code=400, detail="Live streams are not supported")
 
@@ -383,10 +416,12 @@ def youtube_download(
     model: str = Form("htdemucs"),
     recover: bool = Form(False),
     recovery_model: str = Form(DEFAULT_MODEL),
+    auto_split: bool = Form(False),
 ):
-    """Start downloading audio from a YouTube URL in the background."""
-    if recover and recovery_model.lower() not in SUPPORTED_MODELS:
-        raise HTTPException(status_code=400, detail=f"Unknown recovery_model '{recovery_model}'")
+    """Start downloading audio from a YouTube URL in the background. With
+    auto_split the separation is queued right after the download (no confirm
+    step); otherwise the job waits as "downloaded" for /youtube/confirm."""
+    validate_settings(model, recover, recovery_model)
 
     task_id = str(uuid.uuid4())
     create_task(
@@ -398,7 +433,7 @@ def youtube_download(
         recovery_model=recovery_model,
         source_name=url,
     )
-    background_tasks.add_task(download_youtube_audio, task_id, url)
+    background_tasks.add_task(download_youtube_audio, task_id, url, auto_split)
     return {"task_id": task_id}
 
 
@@ -437,9 +472,19 @@ def youtube_preview(task_id: str):
 
 
 @app.get("/tasks")
-def get_tasks(limit: int = 50):
-    """Recent jobs, newest first, so the UI can reopen past results."""
+def get_tasks(
+    limit: int = 50,
+    before: str | None = None,
+    q: str | None = None,
+    status: str | None = None,
+):
+    """Recent jobs, newest first. Page back with `before` = the last row's
+    created_at; `q` searches names; `status` is a comma-separated filter.
+    `in_flight` counts every queued/running job (for a header badge)."""
+    statuses = [s for s in (status or "").split(",") if s] or None
+    rows = list_tasks(min(max(limit, 1), 200), before=before, q=q, statuses=statuses)
     return {
+        "in_flight": count_in_flight(),
         "tasks": [
             {
                 "task_id": t["id"],
@@ -456,8 +501,15 @@ def get_tasks(limit: int = 50):
                 "duration": t.get("duration"),
                 "bpm": t.get("bpm"),
                 "key": t.get("song_key"),
+                "started_at": t.get("started_at"),
+                "finished_at": t.get("finished_at"),
+                "step": t.get("step"),
+                "step_index": t.get("step_index"),
+                "step_total": t.get("step_total"),
+                "current_stem": t.get("current_stem"),
+                "download_percent": t.get("download_percent"),
             }
-            for t in list_tasks(min(max(limit, 1), 200))
+            for t in rows
         ]
     }
 
@@ -551,6 +603,7 @@ def get_status(task_id: str):
         "error", "title", "thumbnail", "duration", "duration_formatted",
         "step", "step_index", "step_total", "current_stem",
         "recover", "recovery_model", "bpm",
+        "created_at", "started_at", "finished_at", "download_percent", "model", "source_name",
     ):
         if key in task_info:
             response[key] = task_info[key]

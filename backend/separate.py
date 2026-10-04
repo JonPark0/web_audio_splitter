@@ -31,6 +31,15 @@ class SeparationError(RuntimeError):
     """Raised when a separation subprocess fails or produces no output."""
 
 
+def describe_failure(stderr: str) -> str:
+    """A short, actionable reason from a separator's stderr."""
+    text = stderr or ""
+    if "out of memory" in text.lower():
+        return "the GPU ran out of memory (try htdemucs, a shorter file, or wait for other jobs)"
+    lines = [l.strip() for l in text.strip().splitlines() if l.strip()]
+    return lines[-1][:300] if lines else "unknown error"
+
+
 def separate_audio(file_path: Path, out_dir: Path, model: str, shifts: int, device: str) -> None:
     if model in DEMUCS_MODELS:
         _separate_demucs(file_path, out_dir, model, shifts)
