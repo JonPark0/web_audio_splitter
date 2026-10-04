@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { FiMoreHorizontal, FiPlus, FiSliders } from 'react-icons/fi';
+import { FiCheckSquare, FiMoreHorizontal, FiPlus, FiSliders } from 'react-icons/fi';
 import TextButton from '../TextButton';
 import { BpmRange, KeySelect, SortSelect, TagFilterButton, useDraft } from './Filters';
 import { ActionList, Popover } from './Sheet';
@@ -180,7 +180,7 @@ export function DesktopToolbar({
 }
 
 /** Phone: one 52 px row - search, Filters (44), Import + (44). */
-export function PhoneBar({ filters, onFilters, activeCount, counts, onOpenFilters, onImport }) {
+export function PhoneBar({ filters, onFilters, activeCount, counts, onOpenFilters, onImport, onSelect }) {
   return (
     <div className="flex h-[52px] items-center gap-1">
       <SearchInput
@@ -199,6 +199,15 @@ export function PhoneBar({ filters, onFilters, activeCount, counts, onOpenFilter
       >
         <FiSliders className="icon" strokeWidth={1.5} aria-hidden="true" />
         {activeCount > 0 && <span className="text-caption tabular-nums">{activeCount}</span>}
+      </TextButton>
+      <TextButton
+        label=""
+        onClick={onSelect}
+        disabled={!counts.loaded}
+        aria-label="Select samples"
+        className="h-11 w-11 shrink-0 justify-center text-h4"
+      >
+        <FiCheckSquare className="icon" strokeWidth={1.5} aria-hidden="true" />
       </TextButton>
       <TextButton
         label=""

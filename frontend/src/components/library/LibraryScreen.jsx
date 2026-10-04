@@ -170,6 +170,13 @@ export default function LibraryScreen() {
   // --- selection / row state ---------------------------------------------
   const [selectedId, setSelectedId] = useState(saved?.selectedId || null);
   const [checked, setChecked] = useState(() => new Set());
+  // Phone: the Select button shows every card's checkbox before anything is
+  // checked (long-press on a card still starts it too).
+  const [selectMode, setSelectMode] = useState(false);
+  const clearChecked = () => {
+    setChecked(new Set());
+    setSelectMode(false);
+  };
   const anchorRef = useRef(null);
   const [renamingId, setRenamingId] = useState(null);
   const [confirmingId, setConfirmingId] = useState(null);
@@ -707,7 +714,8 @@ export default function LibraryScreen() {
   const counts = { matched: list.matched, total: list.total, loaded: list.loaded };
   const checkState = checked.size === 0 ? 'none' : samples.every((s) => checked.has(s.id)) ? 'all' : 'some';
   const playingSample = playingId ? byId.get(playingId) : null;
-  const bottomBar = phone && (checked.size > 0 || playingSample);
+  const phoneSelecting = phone && (selectMode || checked.size > 0);
+  const bottomBar = phone && (phoneSelecting || playingSample);
   const stickyTop = HEADER_PX + (phone ? PHONE_BAR_PX : TOOLBAR_PX);
 
   // --- render -------------------------------------------------------------
@@ -724,6 +732,7 @@ export default function LibraryScreen() {
           counts={counts}
           onOpenFilters={() => setSheet({ type: 'filters' })}
           onImport={() => fileInputRef.current?.click()}
+          onSelect={() => setSelectMode(true)}
         />
       ) : checked.size > 0 ? (
         <BulkBar
@@ -828,7 +837,7 @@ export default function LibraryScreen() {
                 sample={s}
                 selected={s.id === selectedId}
                 checked={checked.has(s.id)}
-                selecting={checked.size > 0}
+                selecting={selectMode || checked.size > 0}
                 playing={s.id === playingId}
                 loading={s.id === loadingId}
                 error={rowErrors[s.id]}
@@ -1026,14 +1035,14 @@ export default function LibraryScreen() {
         />
       )}
 
-      {phone && checked.size > 0 && (
+      {phoneSelecting && (
         <BulkBar
           phone
           count={checked.size}
           matched={list.matched ?? samples.length}
           allMatched={allMatchedChecked}
           onSelectAllMatched={selectAllMatched}
-          onClear={() => setChecked(new Set())}
+          onClear={clearChecked}
           onReanalyze={() => bulkReanalyze(checkedIds)}
           onZip={bulkZip}
           onDelete={bulkDelete}
@@ -1043,7 +1052,7 @@ export default function LibraryScreen() {
         />
       )}
 
-      {phone && checked.size === 0 && playingSample && (
+      {phone && !phoneSelecting && playingSample && (
         <NowPlaying
           sample={playingSample}
           loading={loadingId === playingSample.id}
