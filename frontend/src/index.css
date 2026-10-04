@@ -262,6 +262,23 @@
   select.ainput:disabled {
     cursor: default;
   }
+  /* Focus thickens the underline to 2px (Palnarium's search field), so a
+     focused select / URL field is visible at a glance; the negative margin
+     keeps the row from shifting by the extra pixel. */
+  .ainput:focus,
+  .ainput:focus-visible {
+    border-bottom-width: 2px;
+    border-bottom-color: theme('colors.ink');
+    margin-bottom: -1px;
+  }
+
+  /* The chosen word of a WordToggle: every word is ink (actionable), the
+     chosen one is marked like the current page - hover weight + underline. */
+  .toggle-word.is-chosen {
+    text-decoration: underline;
+    text-underline-offset: 4px;
+    text-decoration-thickness: 1px;
+  }
 
   /* Range slider - app-only; Palnarium has none. Extrapolated from its
      parts: the track is a hairline that darkens on hover/focus like a
@@ -321,6 +338,37 @@
     cursor: default;
     opacity: 0.25;
   }
+}
+
+/* Touch: every control at least 44 x 44 px, keeping the bare-text look -
+   the box grows, the word stays centred in it. Inputs at 16px or more so
+   iOS doesn't zoom the page when one is focused. */
+@media (pointer: coarse) {
+  .link {
+    min-height: 44px;
+    min-width: 44px;
+    justify-content: center;
+  }
+  .ainput {
+    min-height: 44px;
+  }
+  input,
+  select,
+  textarea,
+  .ainput {
+    font-size: max(1rem, 1em);
+  }
+  .slider-touch {
+    height: 44px;
+  }
+}
+
+/* Headings and <main> receive focus after a route change (for keyboard and
+   screen-reader users); they aren't controls, so no ring. */
+h1[tabindex='-1']:focus,
+h2[tabindex='-1']:focus,
+main[tabindex='-1']:focus {
+  outline: none;
 }
 
 /* Keep the weight change, drop everything that moves (Palnarium). */

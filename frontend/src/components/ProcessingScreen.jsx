@@ -1,106 +1,79 @@
-import React, { useEffect, useState } from 'react';
-import { getStatus, getResult, isTaskGone } from '../api';
+import React, { useState } from 'react';
+import { cancelTask, errorDetail } from '../api';
 import ProgressStages from './ProgressStages';
-import ErrorBanner from './ErrorBanner';
-import Split from './Split';
 import TextButton from './TextButton';
-import RetryPanel from './RetryPanel';
-import useTaskModel from './useTaskModel';
+import Hairline from './jobs/Hairline';
+import { estimate } from './jobs/eta';
+import { formatDuration, formatSpan } from './jobs/format';
+import { jobsChanged } from './jobs/jobsStore';
 
-export default function ProcessingScreen({ taskId, recoveryState, model, setStep, setResult, onRetried }) {
-  const [statusData, setStatusData] = useState({ status: 'queued' });
+function Meta({ label, children }) {
+  return (
+    <div className="flex min-w-0 flex-col">
+      <dt className="text-caption text-muted">{label}</dt>
+      <dd className="m-0 break-words tabular-nums">{children}</dd>
+    </div>
+  );
+}
+
+/**
+ * Progress of a queued / running job (the job view polls and passes the
+ * /status payload as `task`): settings, audio length, elapsed time, an
+ * estimate of what's left, the stages, and Cancel.
+ */
+export default function ProcessingScreen({ taskId, task, now, calib, onChanged }) {
+  const [cancelState, setCancelState] = useState(''); // '' | 'sending' | 'cancelling'
   const [error, setError] = useState('');
-  const [retrying, setRetrying] = useState(false);
-  // A failed separation can be re-run from the same audio with other settings.
-  const failed = statusData.status === 'failed';
-  const jobModel = useTaskModel(taskId, model, retrying);
+  const est = estimate(task, now, calib);
+  const queued = task.status === 'queued';
 
-  useEffect(() => {
-    // Self-scheduling poll: the next request is only queued once the previous
-    // one settles, so slow responses never overlap (and a tick can't fire a
-    // duplicate getResult while the first one is still in flight).
-    let cancelled = false;
-    let timer;
+  const cancel = async () => {
+    setCancelState('sending');
+    setError('');
+    try {
+      const res = await cancelTask(taskId);
+      setCancelState(res.data?.status === 'cancelling' ? 'cancelling' : '');
+      jobsChanged();
+      onChanged?.();
+    } catch (e) {
+      setCancelState('');
+      setError(errorDetail(e, 'Could not cancel this job.'));
+    }
+  };
 
-    const poll = async () => {
-      try {
-        const res = await getStatus(taskId);
-        if (cancelled) return;
-        setStatusData(res.data);
+  let remaining = '—';
+  if (queued) remaining = task.queue_position ? `starts after ${task.queue_position} more` : 'starting soon';
+  else if (est?.total) remaining = est.remaining > 1 ? `about ${formatSpan(est.remaining)}` : 'any moment now';
 
-        if (res.data.status === 'completed') {
-          const resultRes = await getResult(taskId);
-          if (cancelled) return;
-          setResult(resultRes.data);
-          setStep('result');
-          return;
-        } else if (res.data.status === 'failed') {
-          setError(res.data.error || 'Processing failed.');
-          return;
-        }
-      } catch (e) {
-        if (cancelled) return;
-        if (isTaskGone(e)) {
-          setError('This task is no longer on the server (it may have restarted). Please start over.');
-          return;
-        }
-        console.error(e);
-      }
-      if (!cancelled) timer = setTimeout(poll, 2000);
-    };
-    timer = setTimeout(poll, 2000);
-
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [taskId]);
+  const bar = queued ? null : est?.fraction ?? 'indeterminate';
 
   return (
-    <Split title="Processing">
-      <div className="flex flex-col gap-8">
-        <ProgressStages
-          recover={recoveryState?.recover}
-          step={statusData.step || 'separating'}
-          stepIndex={statusData.step_index}
-          stepTotal={statusData.step_total}
-          currentStem={statusData.current_stem}
-          status={statusData.status}
-        />
+    <div className="flex flex-col gap-3">
+      <dl className="m-0 grid grid-cols-3 gap-x-4 gap-y-2 sm:gap-x-6">
+        <Meta label="Model">{task.model || '—'}</Meta>
+        <Meta label="Restoration">{task.recover ? task.recovery_model : 'Off'}</Meta>
+        <Meta label="Audio">{formatDuration(task.duration) || '—'}</Meta>
+        <Meta label="Elapsed">{task.started_at && est ? formatSpan(est.elapsed) : 'not started'}</Meta>
+        <Meta label="Remaining">{remaining}</Meta>
+        <Meta label="Done">{typeof bar === 'number' ? `about ${Math.round(bar * 100)}%` : queued ? '0%' : '—'}</Meta>
+      </dl>
 
-        {error && (
-          <div className="flex flex-col items-center gap-4 md:items-start">
-            <ErrorBanner message={error} />
-            <div className="flex flex-wrap items-baseline gap-x-8 gap-y-3 max-md:justify-center">
-              <TextButton onClick={() => setStep('upload')} className="text-h3">
-                Start Over
-              </TextButton>
-              {failed && onRetried && (
-                <TextButton
-                  muted
-                  current={retrying}
-                  aria-expanded={retrying}
-                  onClick={() => setRetrying((r) => !r)}
-                  title="Run this job again with a different model or restoration"
-                >
-                  Retry with other settings
-                </TextButton>
-              )}
-            </div>
-            {failed && retrying && (
-              <RetryPanel
-                className="w-full border-t border-line pt-6"
-                taskId={taskId}
-                initialModel={jobModel}
-                initialRecover={statusData.recover ?? recoveryState?.recover}
-                initialRecoveryModel={statusData.recovery_model ?? recoveryState?.recoveryModel}
-                onStarted={onRetried}
-                onCancel={() => setRetrying(false)}
-              />
-            )}
-          </div>
+      <ProgressStages task={task} />
+      <Hairline value={bar} label="Job progress" />
+
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-1">
+        <TextButton onClick={cancel} disabled={!!cancelState}>
+          {cancelState === 'sending' ? 'Cancelling...' : cancelState === 'cancelling' ? 'Stopping the worker...' : 'Cancel job'}
+        </TextButton>
+        {error ? (
+          <p className="m-0 text-caption" role="alert">
+            <span className="text-muted">Error — </span>
+            {error}
+          </p>
+        ) : (
+          <p className="m-0 text-caption text-muted">You can leave this page — the job keeps running and shows in Jobs.</p>
         )}
       </div>
-    </Split>
+    </div>
   );
 }

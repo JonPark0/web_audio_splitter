@@ -1,6 +1,6 @@
-import React, { useEffect, useId, useState } from 'react';
-import { retryTask, SEPARATION_MODELS } from '../api';
-import Field from './Field';
+import React, { useEffect, useState } from 'react';
+import { errorDetail, retryTask } from '../api';
+import ModelSelect from './jobs/ModelSelect';
 import RecoveryControls from './RecoveryControls';
 import TextButton from './TextButton';
 
@@ -18,7 +18,6 @@ export default function RetryPanel({
   onCancel,
   className = '',
 }) {
-  const selectId = useId();
   const [model, setModel] = useState(initialModel || 'htdemucs');
   const [recover, setRecover] = useState(!!initialRecover);
   const [recoveryModel, setRecoveryModel] = useState(initialRecoveryModel || 'apollo');
@@ -39,64 +38,49 @@ export default function RetryPanel({
       const res = await retryTask(taskId, { model, recover, recoveryModel });
       onStarted({ task_id: res.data.task_id, model, recover, recovery_model: recoveryModel });
     } catch (e) {
-      const detail = e.response?.data?.detail;
-      setError(typeof detail === 'string' ? detail : 'Could not start the retry.');
+      setError(errorDetail(e, 'Could not start the retry.'));
       setStarting(false);
     }
   };
 
-  // A <form> of its own: RecoveryControls' radios have fixed names, and
-  // radios only group per form, so this keeps them apart from the upload
-  // form's identical controls on the same page.
+  // A <form> of its own, so Enter in the select submits this retry only.
   return (
     <form
-      className={`flex flex-col gap-6 ${className}`}
+      className={`flex max-w-xl flex-col gap-2 ${className}`}
       onSubmit={(e) => {
         e.preventDefault();
         if (!starting) start();
       }}
     >
-      <Field label="Separation model" htmlFor={selectId}>
-        <select
-          id={selectId}
-          value={model}
-          onChange={(e) => {
-            setModel(e.target.value);
-            setModelTouched(true);
-          }}
-          className="ainput"
-        >
-          {SEPARATION_MODELS.map((m) => (
-            <option key={m.value} value={m.value}>
-              {m.label}
-            </option>
-          ))}
-        </select>
-      </Field>
-
+      <ModelSelect
+        value={model}
+        disabled={starting}
+        onChange={(v) => {
+          setModel(v);
+          setModelTouched(true);
+        }}
+      />
       <RecoveryControls
         recover={recover}
         setRecover={setRecover}
         recoveryModel={recoveryModel}
         setRecoveryModel={setRecoveryModel}
+        disabled={starting}
       />
-
-      <div className="flex flex-col gap-2">
-        <div className="flex items-baseline gap-5 max-md:justify-center">
-          <TextButton type="submit" disabled={starting}>
-            {starting ? 'Starting...' : 'Start'}
-          </TextButton>
-          <TextButton muted onClick={onCancel} disabled={starting}>
-            Cancel
-          </TextButton>
-        </div>
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-1 pt-1">
+        <TextButton type="submit" disabled={starting}>
+          {starting ? 'Starting...' : 'Start retry'}
+        </TextButton>
+        <TextButton onClick={onCancel} disabled={starting}>
+          Cancel
+        </TextButton>
         {error ? (
           <p className="m-0 text-caption" role="alert">
             <span className="text-muted">Error — </span>
             {error}
           </p>
         ) : (
-          <p className="m-0 text-caption text-muted">Runs a new job from the same audio. This job and its stems are kept.</p>
+          <p className="m-0 text-caption text-muted">A new job from the same audio; this one and its stems are kept.</p>
         )}
       </div>
     </form>
