@@ -417,16 +417,23 @@ def list_samples(
     bpm_min: Optional[float] = None,
     bpm_max: Optional[float] = None,
     sort: str = "newest",
+    task_id: Optional[str] = None,
     limit: int = Query(default=0, ge=0, le=1000),
     offset: int = Query(default=0, ge=0),
 ):
     """Filtered, sorted samples. `q` matches the name, a tag or the source
-    stem; `tags` (comma-separated) requires all of them; `limit` 0 = all.
-    `total` is the unfiltered library size, `matched` the filtered count."""
+    stem; `tags` (comma-separated) requires all of them; `task_id` limits to
+    samples cut from one job; `limit` 0 = all. `total` is the unfiltered
+    library size, `matched` the filtered count."""
     if sort not in SORTS:
         raise HTTPException(status_code=400, detail=f"sort must be one of {', '.join(SORTS)}")
 
     stmt = select(Sample)
+    if task_id:
+        tid = parse_id(task_id)
+        if tid is None:
+            raise HTTPException(status_code=400, detail="task_id must be a UUID")
+        stmt = stmt.where(Sample.source_task_id == tid)
     if q:
         term = q.strip()
         stmt = stmt.where(or_(

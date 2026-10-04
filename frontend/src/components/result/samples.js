@@ -4,7 +4,9 @@ import axios from 'axios';
 // cut from this job (waveform markers) and Undo after a save.
 
 export async function listJobSamples(taskId) {
-  const res = await axios.get('/api/samples', { params: { sort: 'oldest' } });
+  const res = await axios.get('/api/samples', { params: { sort: 'oldest', task_id: taskId } });
+  // The filter again here keeps it right against an older server that
+  // ignores task_id (and would return the whole library).
   return (res.data.samples || []).filter((s) => s.source?.task_id === taskId);
 }
 

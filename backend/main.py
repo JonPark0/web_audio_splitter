@@ -666,8 +666,22 @@ def get_result(task_id: str):
         "recover": task_info.get("recover", False),
         # Jobs from before song analysis existed get analysed on first open.
         **_song_fields(task_info),
-        "duration": task_info.get("duration"),
+        "duration": _duration(task_info, demucs_out_dir, tracks),
     }
+
+
+def _duration(task: dict, folder: Path, tracks: list[str]):
+    """The source duration; jobs from before it was stored at upload get it
+    from a stem (header read only) and keep it."""
+    if task.get("duration") or not tracks:
+        return task.get("duration")
+    import soundfile as sf
+    try:
+        duration = round(sf.info(str(folder / tracks[0])).duration, 3)
+    except Exception:
+        return None
+    update_task(task["id"], duration=duration)
+    return duration
 
 
 def _song_fields(task: dict) -> dict:
