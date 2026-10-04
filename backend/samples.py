@@ -2,19 +2,24 @@
 Sample library endpoints: extract a region of a separated stem (or import a
 file) as a standalone sample, analyze its tempo/key, and browse/edit/delete.
 """
+import io
 import os
+import queue
 import shutil
 import subprocess
+import threading
 import uuid
+import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from json import dumps as _json_dumps
 from pathlib import Path
 from typing import Literal, Optional
 
 import soundfile as sf
-from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Query, Response, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, File, Form, HTTPException, Query, Response, UploadFile
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 
 import analysis
 import numpy as np
@@ -28,6 +33,9 @@ from task_store import get_task, parse_id
 router = APIRouter(prefix="/samples", tags=["samples"])
 
 MIN_SAMPLE_SECONDS = 0.05
+# Imports longer than this are refused: analysis cost grows with length and
+# a library sample is a snippet, not a song (split songs on the Split screen).
+MAX_IMPORT_SECONDS = 600
 ZERO_CROSSING_WINDOW_SEC = 0.01  # how far a boundary may move to find a zero crossing
 NORMALIZE_PEAK = 10 ** (-1 / 20)  # -1 dBFS
 PEAKS_DIR = SAMPLES_DIR / "peaks"
@@ -36,7 +44,8 @@ PEAKS_DIR = SAMPLES_DIR / "peaks"
 RENDER_DIR = SAMPLES_DIR / "renders"
 RENDER_DIR.mkdir(parents=True, exist_ok=True)
 BPM_RANGE = (20.0, 999.0)
-SORTS = ("newest", "oldest", "name", "bpm")
+# "-x" sorts descending. Nulls (no BPM / key) always go last.
+SORTS = ("newest", "oldest", "name", "-name", "bpm", "-bpm", "duration", "-duration", "key")
 
 
 class SampleCreate(BaseModel):
@@ -148,6 +157,16 @@ def _insert_sample(path: Path, name: str, tags: list[str], **source) -> dict:
         return _serialize(sample)
 
 
+# Analysis is CPU-heavy (librosa); run it on one dedicated worker so a burst
+# of new samples queues up instead of competing with API requests (28 at
+# once pushed GET /samples from 9 ms to ~100 ms).
+_analysis_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="sample-analysis")
+
+
+def queue_analysis(sample_id: str) -> None:
+    _analysis_pool.submit(run_analysis, sample_id)
+
+
 def run_analysis(sample_id: str) -> None:
     """Background task: detect tempo/key and store them on the sample."""
     with session_scope() as session:
@@ -156,11 +175,14 @@ def run_analysis(sample_id: str) -> None:
             return
         path = sample.file_path
         source_task_id = sample.source_task_id
+        source_track = sample.source_track or ""
 
     try:
         source = get_task(str(source_task_id)) if source_task_id else None
         bpm_hint = ensure_song_analysis(source)["bpm"] if source else None
-        result = analysis.analyze_file(path, bpm_hint=bpm_hint)
+        # A drums stem has no key; anything the detector finds there is leakage.
+        skip_key = Path(source_track).stem.lower() == "drums"
+        result = analysis.analyze_file(path, bpm_hint=bpm_hint, skip_key=skip_key)
         fields = {"bpm_detected": result["bpm"], "key_detected": result["key"], "analysis_status": "done"}
     except Exception as e:
         print(f"Analysis failed for sample {sample_id}: {e}")
@@ -215,7 +237,7 @@ def _safe_filename(name: str, fallback: str = "sample") -> str:
 
 
 @router.post("", status_code=201)
-def create_sample(body: SampleCreate, background_tasks: BackgroundTasks):
+def create_sample(body: SampleCreate):
     """Cut [start_sec, end_sec) out of a stem into a new library sample."""
     task = get_task(body.task_id)
     if not task:
@@ -252,13 +274,12 @@ def create_sample(body: SampleCreate, background_tasks: BackgroundTasks):
         start_sec=start / sr,
         end_sec=stop / sr,
     )
-    background_tasks.add_task(run_analysis, result["id"])
+    queue_analysis(result["id"])
     return result
 
 
 @router.post("/import", status_code=201)
 def import_sample(
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     name: Optional[str] = Form(None),
     tags: Optional[str] = Form(None),
@@ -276,6 +297,12 @@ def import_sample(
     if process.returncode != 0 or not out_path.exists():
         out_path.unlink(missing_ok=True)
         raise HTTPException(status_code=400, detail="Unsupported or unreadable audio file")
+    if sf.info(str(out_path)).duration > MAX_IMPORT_SECONDS:
+        out_path.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Samples are limited to {MAX_IMPORT_SECONDS // 60} minutes; split longer audio on the Split screen",
+        )
 
     default_name = Path(file.filename or "sample").stem
     result = _insert_sample(
@@ -283,7 +310,7 @@ def import_sample(
         (name or "").strip() or default_name,
         (tags or "").split(","),
     )
-    background_tasks.add_task(run_analysis, result["id"])
+    queue_analysis(result["id"])
     return result
 
 
@@ -291,19 +318,33 @@ def import_sample(
 def list_samples(
     q: Optional[str] = None,
     tag: Optional[str] = None,
+    tags: Optional[str] = None,
     key: Optional[str] = None,
     bpm_min: Optional[float] = None,
     bpm_max: Optional[float] = None,
     sort: str = "newest",
+    limit: int = Query(default=0, ge=0, le=1000),
+    offset: int = Query(default=0, ge=0),
 ):
+    """Filtered, sorted samples. `q` matches the name, a tag or the source
+    stem; `tags` (comma-separated) requires all of them; `limit` 0 = all.
+    `total` is the unfiltered library size, `matched` the filtered count."""
     if sort not in SORTS:
         raise HTTPException(status_code=400, detail=f"sort must be one of {', '.join(SORTS)}")
 
     stmt = select(Sample)
     if q:
-        stmt = stmt.where(Sample.name.icontains(q, autoescape=True))
+        term = q.strip()
+        stmt = stmt.where(or_(
+            Sample.name.icontains(term, autoescape=True),
+            Sample.source_track.icontains(term, autoescape=True),
+            func.array_to_string(Sample.tags, " ").icontains(term, autoescape=True),
+        ))
+    wanted = [t.strip().lower() for t in (tags or "").split(",") if t.strip()]
     if tag:
-        stmt = stmt.where(Sample.tags.any(tag))
+        wanted.append(tag.strip().lower())
+    if wanted:
+        stmt = stmt.where(Sample.tags.contains(wanted))
     if key:
         stmt = stmt.where(_effective_key() == key)
     if bpm_min is not None:
@@ -315,11 +356,94 @@ def list_samples(
         "newest": [Sample.created_at.desc()],
         "oldest": [Sample.created_at.asc()],
         "name": [func.lower(Sample.name).asc()],
+        "-name": [func.lower(Sample.name).desc()],
         "bpm": [_effective_bpm().asc().nulls_last(), Sample.created_at.desc()],
+        "-bpm": [_effective_bpm().desc().nulls_last(), Sample.created_at.desc()],
+        "duration": [Sample.duration_sec.asc()],
+        "-duration": [Sample.duration_sec.desc()],
+        "key": [_effective_key().asc().nulls_last(), func.lower(Sample.name).asc()],
     }[sort]
     with session_scope() as session:
-        rows = session.scalars(stmt.order_by(*order)).all()
-        return {"samples": [_serialize(s) for s in rows]}
+        matched = session.scalar(select(func.count()).select_from(stmt.subquery()))
+        total = session.scalar(select(func.count()).select_from(Sample))
+        page = stmt.order_by(*order).offset(offset)
+        if limit:
+            page = page.limit(limit)
+        rows = session.scalars(page).all()
+        return {"samples": [_serialize(s) for s in rows], "matched": matched, "total": total}
+
+
+class SampleIds(BaseModel):
+    ids: list[str] = Field(default_factory=list, max_length=2000)
+
+
+@router.post("/export")
+def export_samples(body: SampleIds):
+    """The given samples as one zip (streamed), files named after the
+    samples (duplicates numbered)."""
+    ids = [sid for sid in (parse_id(i) for i in body.ids) if sid]
+    with session_scope() as session:
+        rows = session.scalars(select(Sample).where(Sample.id.in_(ids))).all() if ids else []
+        entries, seen = [], {}
+        for sample in rows:
+            base = _safe_filename(sample.name)
+            n = seen.get(base, 0)
+            seen[base] = n + 1
+            entries.append((Path(sample.file_path), f"{base}.wav" if n == 0 else f"{base} ({n + 1}).wav"))
+    entries = [(path, name) for path, name in entries if path.is_file()]
+    if not entries:
+        raise HTTPException(status_code=404, detail="No samples to export")
+    return StreamingResponse(
+        _zip_stream(entries), media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="samples.zip"'},
+    )
+
+
+class _QueueWriter(io.RawIOBase):
+    def __init__(self, q):
+        self.q = q
+
+    def writable(self):
+        return True
+
+    def write(self, b):
+        self.q.put(bytes(b))
+        return len(b)
+
+
+def _zip_stream(entries):
+    q: queue.Queue = queue.Queue(maxsize=16)
+
+    def produce():
+        try:
+            with zipfile.ZipFile(_QueueWriter(q), "w", compression=zipfile.ZIP_STORED) as zf:
+                for path, arcname in entries:
+                    with open(path, "rb") as src, zf.open(arcname, "w", force_zip64=True) as dst:
+                        shutil.copyfileobj(src, dst, 1024 * 1024)
+        finally:
+            q.put(None)
+
+    threading.Thread(target=produce, daemon=True).start()
+    while (chunk := q.get()) is not None:
+        yield chunk
+
+
+@router.post("/analyze")
+def reanalyze_samples(body: SampleIds):
+    """Re-run tempo/key detection for the given samples (all samples if
+    `ids` is empty). User overrides are kept; only detected values change."""
+    with session_scope() as session:
+        stmt = select(Sample)
+        ids = [sid for sid in (parse_id(i) for i in body.ids) if sid]
+        if ids:
+            stmt = stmt.where(Sample.id.in_(ids))
+        rows = session.scalars(stmt).all()
+        for sample in rows:
+            sample.analysis_status = "pending"
+        targets = [str(sample.id) for sample in rows]
+    for sample_id in targets:
+        queue_analysis(sample_id)
+    return {"queued": len(targets)}
 
 
 # Declared before "/{sample_id}" so "tags" isn't captured as an id.
@@ -358,12 +482,14 @@ def update_sample(sample_id: str, body: SampleUpdate):
         if "bpm" in fields:
             if body.bpm is not None and not (BPM_RANGE[0] <= body.bpm <= BPM_RANGE[1]):
                 raise HTTPException(status_code=400, detail=f"BPM must be between {BPM_RANGE[0]:g} and {BPM_RANGE[1]:g}")
-            sample.bpm_override = round(body.bpm, 2) if body.bpm is not None else None
+            bpm = round(body.bpm, 2) if body.bpm is not None else None
+            # Setting the detected value back is a reset, not an override.
+            sample.bpm_override = None if bpm is not None and bpm == sample.bpm_detected else bpm
             _drop_renders(sample.id)  # stretched against the old source BPM
         if "key" in fields:
             if body.key is not None and body.key not in analysis.VALID_KEYS:
                 raise HTTPException(status_code=400, detail="Unknown key")
-            sample.key_override = body.key
+            sample.key_override = None if body.key == sample.key_detected else body.key
 
         session.flush()
         session.refresh(sample)
@@ -371,14 +497,14 @@ def update_sample(sample_id: str, body: SampleUpdate):
 
 
 @router.post("/{sample_id}/analyze")
-def reanalyze_sample(sample_id: str, background_tasks: BackgroundTasks):
+def reanalyze_sample(sample_id: str):
     with session_scope() as session:
         sample = _get_or_404(session, sample_id)
         sample.analysis_status = "pending"
         session.flush()
         session.refresh(sample)
         result = _serialize(sample)
-    background_tasks.add_task(run_analysis, result["id"])
+    queue_analysis(result["id"])
     return result
 
 
@@ -386,18 +512,21 @@ def reanalyze_sample(sample_id: str, background_tasks: BackgroundTasks):
 def delete_sample(sample_id: str):
     with session_scope() as session:
         sample = _get_or_404(session, sample_id)
-        used_in = session.scalars(
-            select(Project.name)
+        used_in = session.execute(
+            select(Project.id, Project.name)
             .join(ProjectTrack, ProjectTrack.project_id == Project.id)
             .join(Clip, Clip.track_id == ProjectTrack.id)
             .where(Clip.sample_id == sample.id)
             .distinct()
         ).all()
         if used_in:
-            raise HTTPException(
-                status_code=409,
-                detail=f"Sample is used in project(s): {', '.join(used_in)}. Remove its clips first.",
-            )
+            # `detail` stays a string for generic error display; `projects`
+            # lets the UI link to them.
+            names = ", ".join(name for _, name in used_in)
+            return JSONResponse(status_code=409, content={
+                "detail": f"Sample is used in project(s): {names}. Remove its clips first.",
+                "projects": [{"id": str(pid), "name": name} for pid, name in used_in],
+            })
         path = Path(sample.file_path)
         session.delete(sample)
     path.unlink(missing_ok=True)
