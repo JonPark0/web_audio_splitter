@@ -2,10 +2,11 @@ import React from 'react';
 
 /**
  * Word toggle (Palnarium's Published / Draft switch, .atoggle): options are
- * plain words, the chosen one in ink, the others muted - colour alone marks
- * the choice, as on Palnarium. Unchosen words still answer hover with the
- * link weight. Real radios underneath so it stays keyboard- and
- * screen-reader-friendly; focus draws a 2px ink ring around the word.
+ * plain words. Every word is actionable, so all of them stay in ink (muted
+ * is 3.4:1 — too faint for something you must read to act on); the chosen
+ * one is marked like the current page: hover weight + underline. Real
+ * radios underneath so it stays keyboard- and screen-reader-friendly; focus
+ * draws a 2px ink ring around the word. Disabled: every word muted.
  */
 export default function WordToggle({
   name,
@@ -13,14 +14,18 @@ export default function WordToggle({
   value,
   onChange,
   disabled = false,
-  centerOnMobile = true, // Split screens centre everything on mobile
+  centerOnMobile = false,
   className = '',
+  'aria-label': ariaLabel,
+  'aria-labelledby': ariaLabelledby,
 }) {
   return (
     <div
       role="radiogroup"
+      aria-label={ariaLabel}
+      aria-labelledby={ariaLabelledby}
       aria-disabled={disabled || undefined}
-      className={`flex flex-wrap gap-x-5 gap-y-2 ${centerOnMobile ? 'max-md:justify-center' : ''} ${className}`}
+      className={`flex flex-wrap items-center gap-x-4 gap-y-1 ${centerOnMobile ? 'max-sm:justify-center' : ''} ${className}`}
     >
       {options.map((o) => {
         const checked = o.value === value;
@@ -38,8 +43,8 @@ export default function WordToggle({
             <span
               data-label={o.label}
               aria-disabled={disabled || undefined}
-              className={`link peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-ink ${
-                checked && !disabled ? '' : '!text-muted'
+              className={`link toggle-word peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-ink ${
+                checked ? 'is-current is-chosen' : ''
               }`}
             >
               {o.label}

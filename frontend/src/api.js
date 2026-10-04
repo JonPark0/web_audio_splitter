@@ -8,18 +8,29 @@ export const RECOVERY_MODELS = [
   { value: 'flashsr', label: 'FlashSR', hint: 'Fastest (single-step). Unproven on music specifically, no stated license.' },
 ];
 
+// `hint`: one line for pickers; `recommended`: listed first, in its own group.
 export const SEPARATION_MODELS = [
-  { value: 'htdemucs', label: 'htdemucs (Default)' },
-  { value: 'htdemucs_ft', label: 'htdemucs_ft (Fine-tuned)' },
-  { value: 'htdemucs_6s', label: 'htdemucs_6s (6 stems)' },
-  { value: 'hdemucs_mmi', label: 'hdemucs_mmi' },
-  { value: 'mdx', label: 'mdx' },
-  { value: 'mdx_extra', label: 'mdx_extra' },
-  { value: 'mdx_q', label: 'mdx_q (Quantized)' },
-  { value: 'mdx_extra_q', label: 'mdx_extra_q (Quantized)' },
-  { value: 'SIG', label: 'SIG' },
-  { value: 'bs_roformer', label: 'BS-Roformer (6-stem, higher SDR)' },
+  { value: 'htdemucs', label: 'htdemucs (Default)', hint: '4 stems (vocals, drums, bass, other) · fast', recommended: true },
+  { value: 'htdemucs_ft', label: 'htdemucs_ft (Fine-tuned)', hint: '4 stems · a little cleaner than htdemucs, about 4× slower' },
+  { value: 'htdemucs_6s', label: 'htdemucs_6s (6 stems)', hint: '6 stems (adds guitar, piano) · piano is weak' },
+  { value: 'hdemucs_mmi', label: 'hdemucs_mmi', hint: '4 stems · Hybrid Demucs v3' },
+  { value: 'mdx', label: 'mdx', hint: '4 stems · MDX challenge model' },
+  { value: 'mdx_extra', label: 'mdx_extra', hint: '4 stems · MDX trained on extra data' },
+  { value: 'mdx_q', label: 'mdx_q (Quantized)', hint: '4 stems · smaller mdx, slightly lower quality' },
+  { value: 'mdx_extra_q', label: 'mdx_extra_q (Quantized)', hint: '4 stems · smaller mdx_extra, slightly lower quality' },
+  { value: 'SIG', label: 'SIG', hint: '4 stems · Demucs SIG model' },
+  {
+    value: 'bs_roformer',
+    label: 'BS-Roformer (6-stem, higher SDR)',
+    hint: '6 stems (vocals, drums, bass, guitar, piano, other) + instrumental · best quality, slower',
+    recommended: true,
+  },
 ];
+
+/** True when `err` is an aborted request (AbortController), not a failure. */
+export function isCanceled(err) {
+  return axios.isCancel(err) || err?.code === 'ERR_CANCELED' || err?.name === 'CanceledError';
+}
 
 /**
  * A readable message from an API error. FastAPI sends `detail` as a string
