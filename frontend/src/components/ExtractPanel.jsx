@@ -106,6 +106,7 @@ export default function ExtractPanel({
   layout = 'docked',
   onHeight,
   viewer,
+  coarse = false,
 }) {
   const sheet = layout === 'sheet';
   const rootRef = useRef(null);
@@ -265,7 +266,11 @@ export default function ExtractPanel({
       );
     if (tooShort) return <span role="status">Minimum 50 ms</span>;
     if (!selection)
-      return <span className="text-muted">{sheet ? 'Set start and end at the playhead, or drag the handles.' : 'Drag across a waveform to select — or set start/end at the playhead.'}</span>;
+      return (
+        <span className="text-muted">
+          {sheet || coarse ? 'Tap a waveform to move the playhead, then Set start / Set end; drag the handles to adjust.' : 'Drag across a waveform to select — or set start/end at the playhead.'}
+        </span>
+      );
     if (!sheet) return <span className="hidden text-muted lg:inline">←/→ nudge 1 ms · Shift 10 ms · Alt 1 beat · [ ] pick edge · Z zoom</span>;
     return null;
   })();
@@ -318,7 +323,7 @@ export default function ExtractPanel({
         onFocus={() => onActiveEdge('start')}
         onCommit={(t) => setEdge('start', t)}
         step={stepSec}
-        steppers={sheet}
+        steppers={sheet || coarse}
       />
       <TimeField
         label="End"
@@ -328,7 +333,7 @@ export default function ExtractPanel({
         onFocus={() => onActiveEdge('end')}
         onCommit={(t) => setEdge('end', t)}
         step={stepSec}
-        steppers={sheet}
+        steppers={sheet || coarse}
       />
     </>
   );
@@ -493,7 +498,7 @@ export default function ExtractPanel({
   return (
     <div ref={rootRef} className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-paper" role="region" aria-label="Extract a sample">
       <div className="mx-auto flex max-w-[1920px] flex-col gap-1.5 px-4 py-2 text-caption sm:px-6 lg:px-8">
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5">
+        <div className="rs-touch-lines flex flex-wrap items-center gap-x-5 gap-y-1.5">
           <span className="text-h4 leading-none">Extract</span>
           {sourceSelect}
           {fields}
@@ -510,7 +515,7 @@ export default function ExtractPanel({
             Close
           </TextButton>
         </div>
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5">
+        <div className="rs-touch-lines flex flex-wrap items-center gap-x-5 gap-y-1.5">
           {nameInput}
           {tagsInput}
           {processing}
@@ -519,7 +524,7 @@ export default function ExtractPanel({
             {saveMixBtn}
           </span>
         </div>
-        <div className="flex h-5 min-w-0 items-center">{statusLine}</div>
+        <div className="rs-touch-lines flex min-h-5 min-w-0 items-center">{statusLine}</div>
       </div>
     </div>
   );

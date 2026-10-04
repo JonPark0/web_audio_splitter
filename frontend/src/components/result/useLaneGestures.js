@@ -92,9 +92,9 @@ export default function useLaneGestures(ref, opts, deps = []) {
       const base = { lane, id: e.pointerId, x0: e.clientX };
       if (handle && sel) {
         const edge = handle.dataset.handle;
-        g = { ...base, mode: 'edge', edge, track: sel.track, fixed: edge === 'start' ? sel.end : sel.start };
+        g = { ...base, mode: 'edge', edge, track: sel.track, fixed: edge === 'start' ? sel.end : sel.start, t0: t, still: true };
       } else if (grab && sel) {
-        g = { ...base, mode: 'move', track: sel.track, off: t - sel.start, len: sel.end - sel.start };
+        g = { ...base, mode: 'move', track: sel.track, off: t - sel.start, len: sel.end - sel.start, t0: t, still: true };
       } else {
         g = {
           ...base,
@@ -126,6 +126,10 @@ export default function useLaneGestures(ref, opts, deps = []) {
       if (!g || e.pointerId !== g.id) return;
       const t = timeAt(localX(g.lane, e.clientX));
       const { snap } = o();
+      if (g.still) {
+        if (Math.abs(e.clientX - g.x0) < DRAG_PX) return; // a tap, so far
+        g.still = false;
+      }
       if (g.mode === 'pending') {
         if (Math.abs(e.clientX - g.x0) < DRAG_PX) return;
         if (g.touch) g.mode = o().timeline.get().zoomed ? 'pan' : 'none';
@@ -167,6 +171,11 @@ export default function useLaneGestures(ref, opts, deps = []) {
       if (g.mode === 'select' || g.mode === 'edge' || g.mode === 'move') onMove(e);
       const done = g;
       g = null;
+      if (done.still) {
+        // A tap on a handle or the grab strip moves the playhead, like a lane tap.
+        o().onSeek(done.t0, done.track);
+        return;
+      }
       if (done.mode === 'pending') {
         if (done.marker) o().onMarker?.(done.marker);
         else o().onSeek(done.t0, done.track);

@@ -10,6 +10,7 @@ import Lane from './result/Lane';
 export const ROW_COLUMNS = {
   desktop: '184px minmax(0,1fr) 92px',
   tablet: '152px minmax(0,1fr) 76px',
+  touch: '208px minmax(0,1fr) 64px', // coarse pointer, tablet and up
 };
 
 /**
@@ -95,6 +96,10 @@ export default memo(function TrackRow({
     <SpectrogramView taskId={taskId} trackName={track} variant={variant} timeline={timeline} height={size === 'phone' ? 56 : 64} sampleRate={sampleRate} />
   ) : null;
 
+  // Touch screens (tablet, touch laptops) get 44 px targets that never
+  // overlap: two 44 px lines in the label column, Extract + ⋯ as actions.
+  const touch = size !== 'phone' && coarse;
+  const big = size === 'phone' || touch ? 'h-11 min-w-11 justify-center' : '';
   const mute = (
     <TextButton
       current={muted}
@@ -103,7 +108,7 @@ export default memo(function TrackRow({
       title={derived ? 'Mute (derived stems start muted: they repeat the other stems)' : 'Mute'}
       aria-label={`Mute ${label}`}
       data-label="M"
-      className={`rs-hit ${muted ? '' : 'link--muted'} ${size === 'phone' ? 'h-11 min-w-11 justify-center' : ''}`}
+      className={`rs-hit ${muted ? '' : 'link--muted'} ${big}`}
     >
       M
     </TextButton>
@@ -116,10 +121,21 @@ export default memo(function TrackRow({
       title="Solo"
       aria-label={`Solo ${label}`}
       data-label="S"
-      className={`rs-hit ${soloed ? '' : 'link--muted'} ${size === 'phone' ? 'h-11 min-w-11 justify-center' : ''}`}
+      className={`rs-hit ${soloed ? '' : 'link--muted'} ${big}`}
     >
       S
     </TextButton>
+  );
+  const moreBtn = (
+    <button
+      type="button"
+      onClick={() => onMenu(track)}
+      className="link flex h-11 w-11 items-center justify-center"
+      aria-label={`${label}: extract, download, spectrogram, level`}
+      title="More"
+    >
+      <FiMoreHorizontal className="icon" aria-hidden="true" />
+    </button>
   );
   const nameEl = (
     <span className="flex min-w-0 items-baseline gap-2">
@@ -138,6 +154,13 @@ export default memo(function TrackRow({
       )}
     </span>
   );
+  const variantEl = hasRecovered ? (
+    <ABToggle compact touch={touch} variant={variant} onChange={(v) => onVariant(track, v)} recoveryModel={recoveryModel} />
+  ) : jobHasRecovered ? (
+    <span className="text-muted" title="No recovered version of this stem">
+      Original
+    </span>
+  ) : null;
 
   if (size === 'phone') {
     return (
@@ -147,18 +170,46 @@ export default memo(function TrackRow({
           {hasRecovered && <span className="text-caption text-muted">{variant === 'recovered' ? 'R' : 'O'}</span>}
           {mute}
           {solo}
-          <button
-            type="button"
-            onClick={() => onMenu(track)}
-            className="link flex h-11 w-11 items-center justify-center"
-            aria-label={`${label}: extract, download, spectrogram, level`}
-            title="More"
-          >
-            <FiMoreHorizontal className="icon" aria-hidden="true" />
-          </button>
+          {moreBtn}
         </div>
         {lane}
         {spec}
+      </div>
+    );
+  }
+
+  if (touch) {
+    return (
+      <div className="grid" style={{ gridTemplateColumns: ROW_COLUMNS.touch }}>
+        <div className="flex min-w-0 flex-col self-start pr-2" style={{ height: rowH }}>
+          <div className="flex h-11 items-center gap-1">
+            <span className="min-w-0 flex-1">{nameEl}</span>
+            <span className="flex shrink-0 items-center text-caption">
+              {mute}
+              {solo}
+            </span>
+          </div>
+          <div className="flex h-11 items-center gap-1">
+            <Fader db={db} onChange={(v) => onDb(track, v)} label={label} className="flex-1" />
+            {hasRecovered && <span className="shrink-0 text-caption">{variantEl}</span>}
+          </div>
+        </div>
+        <div className="min-w-0">
+          {lane}
+          {spec}
+        </div>
+        <div className="flex flex-col items-end self-start text-caption" style={{ height: rowH }}>
+          <TextButton
+            current={extractActive}
+            aria-pressed={extractActive}
+            onClick={() => onExtract(track)}
+            title="Cut a sample from this stem"
+            className="h-11 justify-center pl-2"
+          >
+            Extract
+          </TextButton>
+          {moreBtn}
+        </div>
       </div>
     );
   }
@@ -173,30 +224,8 @@ export default memo(function TrackRow({
             {solo}
           </span>
         </div>
-        {size === 'tablet' ? (
-          // Touch fader is 44 px tall: fader and O|R share one line to keep 80 px rows.
-          <div className="flex items-center gap-2">
-            <Fader db={db} onChange={(v) => onDb(track, v)} label={label} className="flex-1" />
-            {hasRecovered && (
-              <span className="shrink-0 text-caption">
-                <ABToggle compact variant={variant} onChange={(v) => onVariant(track, v)} recoveryModel={recoveryModel} />
-              </span>
-            )}
-          </div>
-        ) : (
-          <>
-            <Fader db={db} onChange={(v) => onDb(track, v)} label={label} />
-            <div className="flex h-5 items-baseline text-caption">
-              {hasRecovered ? (
-                <ABToggle compact variant={variant} onChange={(v) => onVariant(track, v)} recoveryModel={recoveryModel} />
-              ) : jobHasRecovered ? (
-                <span className="text-muted" title="No recovered version of this stem">
-                  Original
-                </span>
-              ) : null}
-            </div>
-          </>
-        )}
+        <Fader db={db} onChange={(v) => onDb(track, v)} label={label} />
+        <div className="flex h-5 items-baseline text-caption">{variantEl}</div>
       </div>
       <div className="min-w-0">
         {lane}
@@ -208,14 +237,14 @@ export default memo(function TrackRow({
           aria-pressed={extractActive}
           onClick={() => onExtract(track)}
           title="Cut a sample from this stem (drag across its waveform)"
-          className="rs-hit leading-5"
+          className="leading-5"
         >
           Extract
         </TextButton>
-        <TextButton as="a" muted href={trackUrl(taskId, track, variant)} download title={`Download ${label} (${variant})`} className="rs-hit leading-5">
+        <TextButton as="a" muted href={trackUrl(taskId, track, variant)} download title={`Download ${label} (${variant})`} className="leading-5">
           Download
         </TextButton>
-        <TextButton muted current={specOpen} aria-pressed={specOpen} onClick={() => onSpec(track)} title="Spectrogram on the same time axis" className="rs-hit leading-5">
+        <TextButton muted current={specOpen} aria-pressed={specOpen} onClick={() => onSpec(track)} title="Spectrogram on the same time axis" className="leading-5">
           Spectrum
         </TextButton>
       </div>

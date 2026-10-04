@@ -75,7 +75,7 @@ export default memo(function Lane({
     if (x1 >= -1 && x0 <= view.width + 1) selBox = { x0, x1, left: Math.max(-1, x0), right: Math.min(view.width + 1, x1) };
   }
   const handleW = coarse ? 44 : 12;
-  const grabH = coarse ? 22 : 14;
+  const grabH = coarse ? Math.min(44, height - 12) : 14;
 
   return (
     <div
@@ -138,10 +138,11 @@ export default memo(function Lane({
         return (
           <div
             key={m.id}
-            data-marker={m.id}
-            title={`${m.name} · ${fmtTime(m.start)}–${fmtTime(m.end)} (in the library) — click to select`}
-            className="absolute bottom-0 z-[1] cursor-pointer"
-            style={{ left, width: Math.max(4, Math.min(view.width, x1) - left), height: coarse ? 14 : 8 }}
+            // Touch: markers are just marks (a 44 px target would eat the lane's taps).
+            data-marker={coarse ? undefined : m.id}
+            title={`${m.name} · ${fmtTime(m.start)}–${fmtTime(m.end)} (in the library)${coarse ? '' : ' — click to select'}`}
+            className={`absolute bottom-0 z-[1] ${coarse ? 'pointer-events-none' : 'cursor-pointer'}`}
+            style={{ left, width: Math.max(4, Math.min(view.width, x1) - left), height: 8 }}
           >
             <span className={`pointer-events-none absolute inset-x-0 bottom-0 h-[3px] ${m.mix ? 'bg-muted' : 'bg-ink'}`} />
           </div>

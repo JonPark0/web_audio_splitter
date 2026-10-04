@@ -54,7 +54,9 @@ export default function Mixer({ taskId, result, bpm, songKey, retrying, onRetryT
   const recTracks = tracks.filter((t) => recoveredSet.has(t));
   const { size, coarse } = useLayoutSize();
   const phone = size === 'phone';
-  const rowH = size === 'desktop' ? (tracks.length <= 4 ? 96 : 72) : 80;
+  const touchRows = !phone && coarse; // two 44 px lines of controls per row
+  const rowH = touchRows ? 88 : size === 'desktop' ? (tracks.length <= 4 ? 96 : 72) : 80;
+  const columns = ROW_COLUMNS[touchRows ? 'touch' : size];
 
   const peaks = useMemo(() => createPeaksStore(taskId), [taskId]);
   const timeline = useMemo(() => createTimeline(result.duration || 0), [taskId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -512,7 +514,7 @@ export default function Mixer({ taskId, result, bpm, songKey, retrying, onRetryT
     onRulerMode: setRulerChoice,
   };
   const ruler = (
-    <Ruler timeline={timeline} bpm={bpm} mode={rulerMode} selection={selection} onSeek={seek} coarse={coarse} />
+    <Ruler timeline={timeline} bpm={bpm} mode={rulerMode} selection={selection} onSeek={seek} coarse={coarse} height={coarse ? 30 : 20} />
   );
 
   // Phone extract sheet: ruler + the source stem's lane + zoom, sticky on top.
@@ -595,7 +597,7 @@ export default function Mixer({ taskId, result, bpm, songKey, retrying, onRetryT
         {phone ? (
           <div ref={rulerColRef}>{sheetOpen ? null : ruler}</div>
         ) : (
-          <div className="grid" style={{ gridTemplateColumns: ROW_COLUMNS[size] }}>
+          <div className="grid" style={{ gridTemplateColumns: columns }}>
             <div className="flex items-start pr-3 text-caption">
               {bpm ? (
                 <WordToggle
@@ -703,6 +705,7 @@ export default function Mixer({ taskId, result, bpm, songKey, retrying, onRetryT
           onRemoved={onRemoved}
           onClose={() => setExtract(null)}
           onHeight={setPanelH}
+          coarse={coarse}
           viewer={sheetViewer}
         />
       )}

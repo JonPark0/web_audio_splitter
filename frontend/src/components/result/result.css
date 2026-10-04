@@ -27,6 +27,21 @@
   }
 }
 
+/* Wrapping control lines (docked extract panel): on touch every item is a
+   44 px line of its own height, so hit areas of wrapped lines can't overlap. */
+@media (pointer: coarse) {
+  .rs-touch-lines {
+    row-gap: 0;
+  }
+  .rs-touch-lines > * {
+    min-height: 44px;
+    align-items: center;
+  }
+  .rs-touch-lines > .link {
+    justify-content: center;
+  }
+}
+
 /* dB fader: a tick at the 0 dB detent (thumb travel is inset by half the
    9 px thumb at both ends). */
 .rs-fader {
