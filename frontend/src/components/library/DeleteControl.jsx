@@ -1,13 +1,22 @@
 import React, { useState } from 'react';
 import TextButton from '../TextButton';
+import { COARSE } from './ui';
 
-/** Two-step delete inside the row - no browser dialogs. */
-export default function DeleteControl({ busy, onDelete }) {
-  const [confirming, setConfirming] = useState(false);
+/**
+ * Two-step delete - no browser dialogs. `onDelete` may be async; the
+ * question closes again whatever the outcome (B2: a refused delete used to
+ * leave "Delete? Confirm" hanging with no explanation). Errors are shown by
+ * the caller, next to the sample.
+ */
+export default function DeleteControl({ busy, onDelete, confirming: confirmingProp, onConfirmingChange, className = '' }) {
+  const controlled = confirmingProp !== undefined;
+  const [own, setOwn] = useState(false);
+  const confirming = controlled ? confirmingProp : own;
+  const setConfirming = (v) => (controlled ? onConfirmingChange?.(v) : setOwn(v));
 
   if (!confirming) {
     return (
-      <TextButton muted disabled={busy} onClick={() => setConfirming(true)}>
+      <TextButton disabled={busy} onClick={() => setConfirming(true)} className={`${COARSE} ${className}`}>
         Delete
       </TextButton>
     );
@@ -15,15 +24,29 @@ export default function DeleteControl({ busy, onDelete }) {
 
   return (
     <span
-      className="inline-flex flex-wrap items-baseline gap-x-3 gap-y-1"
-      onKeyDown={(e) => e.key === 'Escape' && setConfirming(false)}
+      className={`inline-flex flex-wrap items-baseline gap-x-3 gap-y-0 ${className}`}
+      onKeyDown={(e) => {
+        e.stopPropagation();
+        if (e.key === 'Escape') setConfirming(false);
+      }}
     >
       {/* the question is what the reader acts on, so ink (muted is for asides) */}
       <span>Delete?</span>
-      <TextButton autoFocus disabled={busy} onClick={onDelete}>
+      <TextButton
+        autoFocus
+        disabled={busy}
+        className={COARSE}
+        onClick={async () => {
+          try {
+            await onDelete();
+          } finally {
+            setConfirming(false);
+          }
+        }}
+      >
         Confirm
       </TextButton>
-      <TextButton muted disabled={busy} onClick={() => setConfirming(false)}>
+      <TextButton muted disabled={busy} onClick={() => setConfirming(false)} className={COARSE}>
         Cancel
       </TextButton>
     </span>

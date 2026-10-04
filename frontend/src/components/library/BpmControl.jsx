@@ -1,19 +1,22 @@
 import React, { useEffect, useRef, useState } from 'react';
 import TextButton from '../TextButton';
-import { formatBpm, roundBpm } from './format';
+import { BPM_MAX, BPM_MIN } from '../../samplesApi';
+import { bpmSuggestions, formatBpm, roundBpm } from './format';
+import { COARSE, TOUCH_TEXT } from './ui';
 
-const MIN_BPM = 1;
-const MAX_BPM = 999;
 const TAP_RESET_MS = 2000; // idle gap that ends a tap run
 const TAP_WINDOW = 8; // taps averaged
 const TAP_MIN_TO_APPLY = 4; // 3 intervals - fewer is too jittery to save
 
 const toDraft = (bpm) => (bpm == null ? '' : formatBpm(bpm));
+const inRange = (v) => v >= BPM_MIN && v <= BPM_MAX;
 
 /**
- * BPM with octave-error fixes: x2 / /2 on the effective value, a typed
- * override, tap tempo and a reset back to the detected value. Every change
- * is a PATCH; the parent swaps in the returned sample.
+ * BPM with octave-error fixes: x2 / /2 on the effective value (disabled when
+ * the result would leave the backend's 20-999 range, B5), a typed override,
+ * tap tempo, whole-bar suggestions from the length (P9) and a reset back to
+ * the detected value. Every change is a PATCH; the parent swaps in the
+ * returned sample.
  */
 export default function BpmControl({ sample, busy, onPatch }) {
   const { bpm, bpm_detected: detected, bpm_overridden: overridden } = sample;
@@ -26,9 +29,8 @@ export default function BpmControl({ sample, busy, onPatch }) {
   const [tap, setTap] = useState(null); // { count, bpm } while tapping
 
   // Follow server changes (PATCH result, analysis finishing) unless the user
-  // is mid-edit - polling every 2s would otherwise clobber their typing.
-  // Held while a PATCH is in flight; when `busy` clears it re-syncs, which
-  // also undoes the draft if the PATCH failed.
+  // is mid-edit. Held while a PATCH is in flight; when `busy` clears it
+  // re-syncs, which also undoes the draft if the PATCH failed.
   useEffect(() => {
     if (!busy && !focusedRef.current) setDraft(toDraft(bpm));
   }, [bpm, busy]);
@@ -50,7 +52,7 @@ export default function BpmControl({ sample, busy, onPatch }) {
     }
     const value = Number(draft);
     // Blank or out-of-range input just reverts; "reset" has its own control.
-    if (draft.trim() === '' || !Number.isFinite(value) || value < MIN_BPM || value > MAX_BPM) {
+    if (draft.trim() === '' || !Number.isFinite(value) || !inRange(value)) {
       setDraft(toDraft(bpm));
       return;
     }
@@ -59,6 +61,7 @@ export default function BpmControl({ sample, busy, onPatch }) {
   };
 
   const onKeyDown = (e) => {
+    e.stopPropagation();
     if (e.key === 'Enter') {
       e.currentTarget.blur();
     } else if (e.key === 'Escape') {
@@ -67,11 +70,10 @@ export default function BpmControl({ sample, busy, onPatch }) {
     }
   };
 
-  const scale = (factor) => {
-    if (bpm == null) return;
-    const next = roundBpm(bpm * factor);
-    if (next < MIN_BPM || next > MAX_BPM) return;
-    save(next);
+  const scaled = (factor) => (bpm == null ? null : roundBpm(bpm * factor));
+  const canScale = (factor) => {
+    const next = scaled(factor);
+    return next != null && inRange(next);
   };
 
   const onTap = () => {
@@ -91,7 +93,7 @@ export default function BpmControl({ sample, busy, onPatch }) {
       const n = tapsRef.current.length;
       tapsRef.current = [];
       setTap(null);
-      if (n >= TAP_MIN_TO_APPLY && tapped >= MIN_BPM && tapped <= MAX_BPM) save(tapped);
+      if (n >= TAP_MIN_TO_APPLY && inRange(tapped)) save(tapped);
     }, TAP_RESET_MS);
   };
 
@@ -101,10 +103,15 @@ export default function BpmControl({ sample, busy, onPatch }) {
       ? `Tap ${tap.count}/${TAP_MIN_TO_APPLY}`
       : `Tap ${formatBpm(tap.bpm)}`;
 
+  const suggestions = bpmSuggestions(sample.duration_sec, bpm);
+  const btn = `text-caption ${COARSE}`;
+
   return (
-    <div className="flex min-w-0 flex-col gap-2">
-      <div className="flex items-baseline gap-3">
-        <label htmlFor={`bpm-${sample.id}`} className="text-caption text-muted">
+    <div className="flex min-w-0 flex-col gap-1">
+      {/* one line on every width: the ±/tap buttons are 44 px tall on touch,
+          a second row of them would double the editor's height on phones */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-0">
+        <label htmlFor={`bpm-${sample.id}`} className="-mr-1 w-10 shrink-0 text-caption text-muted">
           BPM
         </label>
         <input
@@ -112,8 +119,8 @@ export default function BpmControl({ sample, busy, onPatch }) {
           type="number"
           inputMode="decimal"
           step="0.01"
-          min={MIN_BPM}
-          max={MAX_BPM}
+          min={BPM_MIN}
+          max={BPM_MAX}
           value={draft}
           placeholder="—"
           disabled={busy}
@@ -123,36 +130,50 @@ export default function BpmControl({ sample, busy, onPatch }) {
           onChange={(e) => setDraft(e.target.value)}
           onBlur={commitDraft}
           onKeyDown={onKeyDown}
-          className="ainput w-20 !pb-1 tabular-nums"
+          className={`ainput w-20 !pb-0.5 tabular-nums ${TOUCH_TEXT}`}
         />
-        {overridden && (
-          <span className="truncate text-caption text-muted">(detected {formatBpm(detected)})</span>
-        )}
-      </div>
-      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-caption">
-        <TextButton muted disabled={busy || bpm == null} onClick={() => scale(2)} title="Double the tempo" aria-label="Double BPM">
+        <TextButton disabled={busy || !canScale(2)} onClick={() => save(scaled(2))} title="Double the tempo" aria-label="Double BPM" className={btn}>
           ×2
         </TextButton>
-        <TextButton muted disabled={busy || bpm == null} onClick={() => scale(0.5)} title="Halve the tempo" aria-label="Halve BPM">
+        <TextButton disabled={busy || !canScale(0.5)} onClick={() => save(scaled(0.5))} title={canScale(0.5) || bpm == null ? 'Halve the tempo' : `Below ${BPM_MIN} BPM`} aria-label="Halve BPM" className={btn}>
           ÷2
         </TextButton>
         <TextButton
-          muted
           current={!!tap}
           disabled={busy}
           onClick={onTap}
           label="Tap 000.00"
-          title="Tap along to the beat; saves 2s after the last tap"
-          className="tabular-nums"
+          title="Tap along to the beat; saves 2 s after the last tap"
+          className={`tabular-nums ${btn}`}
         >
           <span aria-live="polite">{tapLabel}</span>
         </TextButton>
-        {overridden && (
-          <TextButton muted disabled={busy} onClick={() => onPatch({ bpm: null })} title="Use the detected BPM">
+      </div>
+      {overridden && (
+        <div className="flex flex-wrap items-center gap-x-4 pl-[52px] text-caption">
+          <span className="text-muted">detected {formatBpm(detected)}</span>
+          <TextButton disabled={busy} onClick={() => onPatch({ bpm: null })} title="Use the detected BPM" className={btn}>
             Reset
           </TextButton>
-        )}
-      </div>
+        </div>
+      )}
+      {suggestions.length > 0 && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-0 pl-[52px] text-caption">
+          <span className="text-muted">Bars</span>
+          {suggestions.map((s) => (
+            <TextButton
+              key={s.bars}
+              disabled={busy}
+              onClick={() => save(s.bpm)}
+              title={`${s.bars} ${s.bars === 1 ? 'bar' : 'bars'} of 4/4 at ${formatBpm(s.bpm)} BPM`}
+              aria-label={`Set ${formatBpm(s.bpm)} BPM (${s.bars} bars)`}
+              className={`tabular-nums ${btn}`}
+            >
+              {`${formatBpm(s.bpm)} · ${s.bars}`}
+            </TextButton>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
