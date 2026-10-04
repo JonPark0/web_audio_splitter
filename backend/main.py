@@ -146,6 +146,9 @@ def process_audio(task_id: str, file_path: Path, model: str, recover: bool = Fal
         update_task(task_id, status="cancelled", error="Cancelled")
     finally:
         update_task(task_id, finished_at=_now_iso())
+    task = get_task(task_id)
+    if task and task["status"] == "completed":
+        warm_peaks(task_id)
 
 
 def _now_iso() -> str:
@@ -252,6 +255,25 @@ def validate_settings(model: str, recover: bool, recovery_model: str) -> None:
 
 def enqueue(task_id: str, file_path: Path, model: str, recover: bool, recovery_model: str) -> None:
     jobs.submit(task_id, process_audio, file_path, model, recover, recovery_model)
+
+
+def warm_peaks(task_id: str) -> None:
+    """Precompute waveform peaks for every stem of a finished job in the
+    background, so the first open of its mixer is instant (each stem takes
+    ~2 s cold)."""
+    def run():
+        task = get_task(task_id)
+        if not task:
+            return
+        base = stems_dir(task)
+        for variant, folder in (("original", base), ("recovered", base / RECOVERED_SUBDIR)):
+            for stem in sorted(folder.glob("*.wav")) if folder.is_dir() else []:
+                try:
+                    peaks.cached(stem, PEAKS_DIR / task_id / variant / f"{stem.stem}@100.json", points_per_second=100)
+                except Exception as e:
+                    print(f"Peaks warm-up failed for {task_id}/{stem.name}: {e}")
+
+    threading.Thread(target=run, daemon=True).start()
 
 
 def song_label(task: dict) -> str:
@@ -633,6 +655,9 @@ def get_result(task_id: str):
 
     return {
         "tracks": tracks,
+        # Mixes of the other stems (BS-Roformer's instrumental): playing them
+        # with the rest doubles the instruments, so mixers mute them by default.
+        "derived_tracks": [t for t in tracks if Path(t).stem in DERIVED_STEMS],
         "recovered_tracks": recovered_tracks,
         "recovered": len(recovered_tracks) > 0,
         "recovery_model": task_info.get("recovery_model"),
@@ -694,6 +719,22 @@ def get_peaks(
     data = peaks.cached(file_path, cache, points_per_second=resolution)
     return Response(content=json.dumps(data, separators=(",", ":")), media_type="application/json",
                     headers=IMMUTABLE_CACHE_HEADERS)
+
+
+@app.get("/onsets/{task_id}/{track_name}")
+def get_onsets(task_id: str, track_name: str, variant: str = "original"):
+    """Transient (onset) times in seconds, for snapping selections to hits."""
+    file_path = _resolve_track_path(task_id, track_name, variant)
+    cache = PEAKS_DIR / task_id / variant / f"{Path(track_name).stem}.onsets.json"
+    if cache.is_file():
+        return Response(content=cache.read_text(), media_type="application/json", headers=IMMUTABLE_CACHE_HEADERS)
+    import librosa
+    y, sr = librosa.load(str(file_path), sr=22050, mono=True, res_type="kaiser_fast")
+    times = librosa.onset.onset_detect(y=y, sr=sr, units="time", backtrack=True)
+    body = json.dumps({"onsets": [round(float(t), 4) for t in times]}, separators=(",", ":"))
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text(body)
+    return Response(content=body, media_type="application/json", headers=IMMUTABLE_CACHE_HEADERS)
 
 
 @app.get("/tasks/{task_id}/stems.zip")

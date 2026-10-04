@@ -92,6 +92,11 @@ class Project(Base):
     loop_enabled: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     loop_start_beat: Mapped[float] = mapped_column(Float, server_default=text("0"))
     loop_end_beat: Mapped[float] = mapped_column(Float, server_default=text("16"))
+    # Incremented on every save; a save based on an older version is refused
+    # (409) so two tabs can't silently overwrite each other.
+    version: Mapped[int] = mapped_column(Integer, server_default=text("1"))
+    # [{"id": str, "beat": float, "name": str}]
+    markers: Mapped[list] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), index=True
@@ -137,3 +142,11 @@ class Clip(Base):
     warp: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     semitones: Mapped[int] = mapped_column(Integer, server_default=text("0"))
     gain: Mapped[float] = mapped_column(Float, server_default=text("1"))
+    # When set, the trimmed region repeats to fill this many beats on the
+    # timeline (clip loop); None = the region plays once.
+    loop_beats: Mapped[Optional[float]] = mapped_column(Float)
+    fade_in_sec: Mapped[float] = mapped_column(Float, server_default=text("0"))
+    fade_out_sec: Mapped[float] = mapped_column(Float, server_default=text("0"))
+    reverse: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    # Fine pitch on top of `semitones` (-100..100); rendered server-side too.
+    cents: Mapped[int] = mapped_column(Integer, server_default=text("0"))

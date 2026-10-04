@@ -10,6 +10,7 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import delete, func, select
 
@@ -31,6 +32,17 @@ class ClipIn(BaseModel):
     warp: bool = False
     semitones: int = Field(default=0, ge=-24, le=24)
     gain: float = Field(default=1.0, ge=0, le=4)
+    loop_beats: Optional[float] = Field(default=None, gt=0, le=100000)
+    fade_in_sec: float = Field(default=0, ge=0, le=600)
+    fade_out_sec: float = Field(default=0, ge=0, le=600)
+    reverse: bool = False
+    cents: int = Field(default=0, ge=-100, le=100)
+
+
+class MarkerIn(BaseModel):
+    id: str = Field(min_length=1, max_length=64)
+    beat: float = Field(ge=0)
+    name: str = Field(default="", max_length=100)
 
 
 class TrackIn(BaseModel):
@@ -61,6 +73,11 @@ class ProjectIn(BaseModel):
     beats_per_bar: int = Field(default=4, ge=1, le=16)
     loop: LoopIn = LoopIn()
     tracks: list[TrackIn] = []
+    markers: list[MarkerIn] = Field(default_factory=list, max_length=500)
+    # The version this edit was based on (from the last GET/PUT). When given
+    # and the project has moved on (another tab saved), the save is refused
+    # with 409 and the current document.
+    base_version: Optional[int] = None
 
 
 class ProjectCreate(BaseModel):
@@ -104,6 +121,11 @@ def _serialize(session, project: Project) -> dict:
             "warp": c.warp,
             "semitones": c.semitones,
             "gain": c.gain,
+            "loop_beats": c.loop_beats,
+            "fade_in_sec": c.fade_in_sec,
+            "fade_out_sec": c.fade_out_sec,
+            "reverse": c.reverse,
+            "cents": c.cents,
         })
 
     return {
@@ -111,6 +133,8 @@ def _serialize(session, project: Project) -> dict:
         "name": project.name,
         "bpm": project.bpm,
         "beats_per_bar": project.beats_per_bar,
+        "version": project.version,
+        "markers": list(project.markers or []),
         "loop": {
             "enabled": project.loop_enabled,
             "start_beat": project.loop_start_beat,
@@ -203,6 +227,11 @@ def save_project(project_id: str, body: ProjectIn):
 
     with session_scope() as session:
         project = _get_or_404(session, project_id)
+        if body.base_version is not None and body.base_version != project.version:
+            return JSONResponse(status_code=409, content={
+                "detail": "This project was changed elsewhere (another tab or window).",
+                "project": _serialize(session, project),
+            })
 
         sample_ids = {c.sample_id for t in body.tracks for c in t.clips}
         samples = {s.id: s for s in session.scalars(select(Sample).where(Sample.id.in_(sample_ids)))} if sample_ids else {}
@@ -230,6 +259,8 @@ def save_project(project_id: str, body: ProjectIn):
         project.loop_enabled = body.loop.enabled
         project.loop_start_beat = body.loop.start_beat
         project.loop_end_beat = body.loop.end_beat
+        project.markers = [m.model_dump() for m in sorted(body.markers, key=lambda m: m.beat)]
+        project.version = (project.version or 0) + 1
 
         session.execute(delete(ProjectTrack).where(ProjectTrack.project_id == project.id))
         for position, t in enumerate(body.tracks):
@@ -248,6 +279,8 @@ def save_project(project_id: str, body: ProjectIn):
                     offset_sec=offset, length_sec=min(c.length_sec, sample.duration_sec - offset),
                     warp=c.warp and _effective_bpm(sample) is not None,
                     semitones=c.semitones, gain=c.gain,
+                    loop_beats=c.loop_beats, fade_in_sec=c.fade_in_sec, fade_out_sec=c.fade_out_sec,
+                    reverse=c.reverse, cents=c.cents,
                 ))
         session.flush()
         # The document changed even if only child rows did.

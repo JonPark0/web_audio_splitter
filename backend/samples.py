@@ -43,6 +43,9 @@ PEAKS_DIR = SAMPLES_DIR / "peaks"
 # BPM, target BPM and semitones (see render_sample).
 RENDER_DIR = SAMPLES_DIR / "renders"
 RENDER_DIR.mkdir(parents=True, exist_ok=True)
+# Renders are full-length float WAVs (a 3-minute sample is ~60 MB per
+# tempo/pitch); least-recently-used ones are evicted past this size.
+RENDER_CACHE_MB = float(os.getenv("RENDER_CACHE_MB", "4096") or 4096)
 BPM_RANGE = (20.0, 999.0)
 # "-x" sorts descending. Nulls (no BPM / key) always go last.
 SORTS = ("newest", "oldest", "name", "-name", "bpm", "-bpm", "duration", "-duration", "key")
@@ -64,6 +67,24 @@ class SampleCreate(BaseModel):
     normalize: bool = False
     fade_in_ms: float = Field(default=0, ge=0, le=10000)
     fade_out_ms: float = Field(default=0, ge=0, le=10000)
+    # Output format; None keeps the source's (which differs per variant:
+    # original stems may be 48 kHz float, recovered ones 44.1 kHz 16-bit).
+    bit_depth: Optional[Literal[16, 24, 32]] = None  # 32 = float
+    sample_rate: Optional[Literal[44100, 48000]] = None
+    mono: bool = False
+
+
+class MixStem(BaseModel):
+    track: str
+    variant: Literal["original", "recovered"] = "original"
+    gain: float = Field(default=1.0, ge=0, le=4)
+
+
+class SampleMixCreate(SampleCreate):
+    """Several stems of one job summed into one sample ("what I hear"):
+    `stems` replaces `track`/`variant`."""
+    track: str = "mix"
+    stems: list[MixStem] = Field(min_length=1, max_length=16)
 
 
 class SampleUpdate(BaseModel):
@@ -181,7 +202,7 @@ def run_analysis(sample_id: str) -> None:
         source = get_task(str(source_task_id)) if source_task_id else None
         bpm_hint = ensure_song_analysis(source)["bpm"] if source else None
         # A drums stem has no key; anything the detector finds there is leakage.
-        skip_key = Path(source_track).stem.lower() == "drums"
+        skip_key = Path(source_track).stem.lower() == "drums" or source_track == "mix: drums"
         result = analysis.analyze_file(path, bpm_hint=bpm_hint, skip_key=skip_key)
         fields = {"bpm_detected": result["bpm"], "key_detected": result["key"], "analysis_status": "done"}
     except Exception as e:
@@ -262,8 +283,7 @@ def create_sample(body: SampleCreate):
     data = _process(data, sr, body)
     sample_id = uuid.uuid4()
     out_path = SAMPLES_DIR / f"{sample_id}.wav"
-    subtype = info.subtype if sf.check_format("WAV", info.subtype) else "FLOAT"
-    sf.write(str(out_path), data, sr, subtype=subtype)
+    _write_output(out_path, data, sr, info.subtype, body)
 
     name = (body.name or "").strip() or f"{Path(body.track).stem} {_format_time(body.start_sec)}"
     result = _insert_sample(
@@ -276,6 +296,80 @@ def create_sample(body: SampleCreate):
     )
     queue_analysis(result["id"])
     return result
+
+
+@router.post("/mix", status_code=201)
+def create_mix_sample(body: SampleMixCreate):
+    """Cut [start_sec, end_sec) out of several stems, summed with per-stem
+    gains (e.g. the mixer's current mute/solo/volume), into one sample."""
+    task = get_task(body.task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task["status"] != "completed":
+        raise HTTPException(status_code=400, detail="Task is not completed")
+
+    sources = []
+    for stem in body.stems:
+        src = track_path(task, stem.track, stem.variant)
+        if src is None:
+            raise HTTPException(status_code=404, detail=f"Track not found: {stem.track} ({stem.variant})")
+        sources.append((src, sf.info(str(src)), stem.gain))
+    audible = [(src, info, gain) for src, info, gain in sources if gain > 0]
+    if not audible:
+        raise HTTPException(status_code=400, detail="Every stem in the mix is silent")
+
+    # Mix at the first stem's rate; others are resampled to it (original
+    # and recovered variants can differ: 48 kHz vs 44.1 kHz).
+    sr = audible[0][1].samplerate
+    length = int(round((body.end_sec - body.start_sec) * sr))
+    if length < MIN_SAMPLE_SECONDS * sr:
+        raise HTTPException(status_code=400, detail="Selection is empty or too short")
+    mix = np.zeros((length, 2), dtype=np.float64)
+    for src, info, gain in audible:
+        start = int(round(body.start_sec * info.samplerate))
+        stop = min(int(round(body.end_sec * info.samplerate)), info.frames)
+        data = sf.read(str(src), start=start, stop=stop, always_2d=True)[0]
+        if data.shape[1] == 1:
+            data = np.repeat(data, 2, axis=1)
+        if info.samplerate != sr:
+            import librosa
+            data = librosa.resample(data.T, orig_sr=info.samplerate, target_sr=sr, axis=-1).T
+        n = min(length, len(data))
+        mix[:n] += data[:n, :2] * gain
+
+    mix = _process(mix, sr, body)
+    sample_id = uuid.uuid4()
+    out_path = SAMPLES_DIR / f"{sample_id}.wav"
+    _write_output(out_path, mix, sr, "FLOAT", body)
+
+    tracks = [stem.track for stem in body.stems if stem.gain > 0]
+    name = (body.name or "").strip() or f"mix {_format_time(body.start_sec)}"
+    result = _insert_sample(
+        out_path, name, body.tags,
+        source_task_id=uuid.UUID(task["id"]),
+        source_track="mix: " + ", ".join(Path(t).stem for t in tracks),
+        source_variant="mix",
+        start_sec=body.start_sec,
+        end_sec=body.start_sec + length / sr,
+    )
+    queue_analysis(result["id"])
+    return result
+
+
+def _write_output(path: Path, data, sr: int, source_subtype: str, opts: SampleCreate) -> None:
+    """Write with the requested format (or the source's)."""
+    if opts.mono and data.shape[1] > 1:
+        data = data.mean(axis=1, keepdims=True)
+    if opts.sample_rate and opts.sample_rate != sr:
+        import librosa
+        data = librosa.resample(data.T, orig_sr=sr, target_sr=opts.sample_rate, axis=-1).T
+        sr = opts.sample_rate
+    subtype = {16: "PCM_16", 24: "PCM_24", 32: "FLOAT"}.get(opts.bit_depth or 0)
+    if subtype is None:
+        subtype = source_subtype if sf.check_format("WAV", source_subtype) else "FLOAT"
+    if subtype != "FLOAT":
+        data = np.clip(data, -1.0, 1.0)  # integer PCM can't hold overs
+    sf.write(str(path), data, sr, subtype=subtype)
 
 
 @router.post("/import", status_code=201)
@@ -546,6 +640,7 @@ def render_sample(
     sample_id: str,
     bpm: float = Query(ge=BPM_RANGE[0], le=BPM_RANGE[1]),
     semitones: int = Query(default=0, ge=-24, le=24),
+    cents: int = Query(default=0, ge=-100, le=100),
 ):
     """The sample time-stretched from its own BPM to `bpm` and pitch-shifted
     by `semitones`, rendered once with Rubber Band (pedalboard) and cached.
@@ -560,11 +655,15 @@ def render_sample(
         src_bpm = sample.bpm_override if sample.bpm_override is not None else sample.bpm_detected
 
     factor = bpm / src_bpm if src_bpm else 1.0
-    if abs(factor - 1.0) < 1e-4 and semitones == 0:
+    pitch = semitones + cents / 100
+    if abs(factor - 1.0) < 1e-4 and pitch == 0:
         return FileResponse(path, media_type="audio/wav", headers=IMMUTABLE_CACHE_HEADERS)
 
-    cache_path = RENDER_DIR / f"{sample.id}_{src_bpm or 0:.2f}_{bpm:.2f}_{semitones}.wav"
-    if not cache_path.exists():
+    pitch_tag = f"{semitones}" if not cents else f"{semitones}c{cents}"
+    cache_path = RENDER_DIR / f"{sample.id}_{src_bpm or 0:.2f}_{bpm:.2f}_{pitch_tag}.wav"
+    if cache_path.exists():
+        cache_path.touch()  # mark as recently used for eviction
+    else:
         import numpy as np
         import pedalboard  # pinned to a build that runs on AVX2-only CPUs (see requirements-app.txt)
 
@@ -573,14 +672,34 @@ def render_sample(
         # frames into 35280, verified empirically.
         out = pedalboard.time_stretch(
             np.ascontiguousarray(audio.T), sr,
-            stretch_factor=factor, pitch_shift_in_semitones=float(semitones), high_quality=True,
+            stretch_factor=factor, pitch_shift_in_semitones=float(pitch), high_quality=True,
         )
         # FLOAT: stretching can push peaks past 1.0, which PCM would clip.
         tmp_path = RENDER_DIR / f".tmp_{uuid.uuid4()}.wav"
         sf.write(str(tmp_path), out.T, sr, subtype="FLOAT")
         os.replace(tmp_path, cache_path)  # atomic, so concurrent requests never read a partial file
+        _evict_renders(keep=cache_path)
 
     return FileResponse(cache_path, media_type="audio/wav", headers=IMMUTABLE_CACHE_HEADERS)
+
+
+def _evict_renders(keep: Path) -> None:
+    files = [f for f in RENDER_DIR.glob("*.wav") if f != keep]
+    total = sum(f.stat().st_size for f in files) + keep.stat().st_size
+    limit = RENDER_CACHE_MB * 1024 * 1024
+    for f in sorted(files, key=lambda f: f.stat().st_mtime):
+        if total <= limit:
+            break
+        total -= f.stat().st_size
+        f.unlink(missing_ok=True)
+
+
+@router.delete("/renders/cache", status_code=204)
+def clear_render_cache():
+    """Drop every cached time-stretch/pitch render (they're re-made on use)."""
+    for f in RENDER_DIR.glob("*.wav"):
+        f.unlink(missing_ok=True)
+    return Response(status_code=204)
 
 
 @router.get("/{sample_id}/audio")
