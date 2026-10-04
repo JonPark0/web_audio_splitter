@@ -79,7 +79,20 @@ def _separate_bs_roformer(file_path: Path, out_dir: Path, device: str) -> None:
     scratch_out = out_dir / f".bs_roformer_out_{task_id}"
     scratch_in.mkdir(parents=True, exist_ok=True)
     scratch_out.mkdir(parents=True, exist_ok=True)
-    shutil.copy(file_path, scratch_in / file_path.name)
+    if file_path.suffix.lower() == ".wav":
+        shutil.copy(file_path, scratch_in / file_path.name)
+    else:
+        # The CLI only picks up .wav files, so an mp3/flac/mp4 upload failed
+        # with "No .wav files found" — decode it to WAV first (stereo 44.1 kHz,
+        # what the model was trained on; the video stream is dropped).
+        decode = jobs.run([
+            "ffmpeg", "-nostdin", "-y", "-loglevel", "error", "-i", str(file_path),
+            "-vn", "-ac", "2", "-ar", "44100", "-c:a", "pcm_f32le", str(scratch_in / f"{task_id}.wav"),
+        ])
+        if decode.returncode != 0:
+            shutil.rmtree(scratch_in, ignore_errors=True)
+            shutil.rmtree(scratch_out, ignore_errors=True)
+            raise SeparationError(f"Could not decode the audio for BS-Roformer: {describe_failure(decode.stderr)}")
 
     cmd = [
         "bs-roformer-infer",
