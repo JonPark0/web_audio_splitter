@@ -5,25 +5,27 @@
 Meta Demucs AI 모델을 사용하여 오디오 파일을 개별 트랙(보컬, 드럼, 베이스, 기타)으로 분리하는 웹 애플리케이션입니다. 손실 압축 소스와 분리 과정 자체가 뭉개거나 약화시키는 중고음역대를 복원하는 **주파수 복원(선택 사항)** 단계가 추가되었습니다.
 
 ## 주요 기능
-- **간편한 업로드:** 드래그 앤 드롭 또는 파일 선택, 또는 YouTube URL 붙여넣기
+- **간편한 업로드:** 오디오(또는 영상) 파일 여러 개를 페이지 어디에든 끌어다 놓거나 선택합니다. 업로드 진행률과 취소를 지원하고, YouTube URL은 다운로드 후 바로 분리하거나 먼저 확인할 수 있습니다.
+- **작업 대기열:** 작업은 한 번에 하나씩 실행되고(GPU 하나에서 두 개를 동시에 돌리면 메모리가 부족해지기 쉬움), Split 화면에 실시간으로 표시됩니다. 대기 순서, 단계, 경과/남은 시간, 검색, 상태 필터, 취소·재실행·삭제를 지원합니다. 앱의 모든 화면에 고유 URL이 있어 새로고침·뒤로 가기·북마크에도 위치가 유지됩니다.
 - **AI 기반 분리:** Meta의 `htdemucs` 모델(BS-Roformer를 포함한 여러 대안 모델)을 사용한 고품질 분리
 - **분리 & 복원:** 작업별로 선택 가능 — 분리 후 각 스템을 복원 모델로 추가 처리:
   - **Apollo** — 손실/압축 음악 복원에 특화된 band-sequence 모델. CPU에서도 충분히 빠름
   - **AudioSR** — 범용 any→48kHz 초고해상도 모델. 더 강력하지만 diffusion 기반으로 느림(RTX 4070 SUPER, 기본 설정, 15초 클립 기준 스템당 약 15-35초 + 작업당 모델 로딩 약 30초)
   - **FlashSR** — single-step distillation 기반, AudioSR보다 훨씬 빠름. 음악에 대한 검증이 부족하고 라이선스가 명시되어 있지 않아 기본값이 아닌 선택 옵션으로 제공
   - 원본 스템은 항상 보존되므로 트랙별로 원본 vs 복원본을 A/B 비교 가능
-- **고급 믹서:**
-  - 각 트랙별 파형 시각화
-  - 동기화된 재생 및 탐색
-  - 트랙별 볼륨, 음소거(Mute), 솔로(Solo) 조절
-  - 복원된 고주파 내용을 직접 눈으로 확인할 수 있는 트랙별 스펙트로그램 보기
-  - 각 트랙 개별 내보내기/다운로드(원본 또는 복원본)
+- **Stem 믹서:**
+  - 바로 열립니다: 파형은 미리 계산한 peaks로 그리고 오디오는 짧은 조각으로 스트리밍합니다(6분짜리 7-stem 작업은 예전에는 재생 전에 약 1 GB를 내려받았습니다).
+  - 하나의 오디오 클록에서 샘플 단위로 정렬해 재생하므로, 탐색하거나 원본/복원본을 바꿔도 stem이 어긋나지 않습니다.
+  - stem별 dB 페이더, 음소거, 솔로. 다른 stem을 합친 파생 stem(BS-Roformer의 instrumental)은 악기가 두 번 들리지 않도록 처음부터 음소거됩니다.
+  - 같은 시간축의 행 안에서 여는 스펙트로그램. −/+/Fit, Ctrl+휠, 핀치로 확대
+  - stem별 다운로드 또는 전체 stem zip 다운로드(원본 또는 복원본)
 - **단계별 진행 표시:** 단순 로딩 표시가 아닌 분리 → 복원 단계별 실제 진행률
-- **샘플 추출:** 각 stem(원본 또는 복원본)의 파형에서 구간을 선택해 샘플로 저장합니다. 서버에서 샘플 단위로 정확하게 잘라냅니다.
-- **샘플 라이브러리:** 저장한 샘플을 검색·태그·미리듣기할 수 있습니다. BPM과 키를 자동으로 분석하고, BPM은 ×2 / ÷2, 직접 입력, 탭 템포로 보정하고 키도 직접 지정할 수 있습니다. 가지고 있는 오디오 파일을 가져올 수도 있습니다.
+- **샘플 추출:** stem(또는 지금 들리는 stem들의 믹스)에서 구간을 선택해 샘플로 저장하고, 서버에서 샘플 단위로 정확하게 잘라냅니다. 시작/끝 숫자 입력, 미세 이동 키, zero crossing·트랜지언트·박자 길이 스냅, 페이드, 노멀라이즈, 리버스, 출력 포맷(16/24/32-bit float, 44.1/48 kHz, 모노)을 지원합니다.
+- **샘플 라이브러리:** 키보드로 다루는 촘촘한 목록(↑/↓ 미리듣기, Space, Enter, Del)에 파형 썸네일, URL에 유지되는 여러 태그·키·BPM 필터, 편집용 인스펙터, 일괄 태그/재분석/zip 다운로드/삭제, 여러 파일 가져오기, Camelot 키 표기, 프로젝트 템포로 미리듣기를 제공합니다. BPM과 키는 자동 분석되고(템포 오차 약 0.03 %), BPM은 ×2 / ÷2, 직접 입력, 탭 템포, 마디에 맞추기로 보정하고 키도 직접 지정할 수 있습니다.
 - **작업 기록:** 작업이 PostgreSQL에 저장되어, 재시작한 뒤에도 이전 결과를 다시 열 수 있습니다. 끝난 작업은 다른 분리 모델이나 복원 설정으로 **다시 실행(Retry)**할 수 있고(같은 원본 음원으로 새 작업을 만들며 기존 작업은 유지), 파일과 함께 **삭제**할 수도 있습니다.
-- **Arrangement View:** Ableton 방식의 마디/박자 타임라인 위에 트랙을 구성합니다. 라이브러리의 샘플을 트랙에 끌어다 놓고, 스냅에 맞춰 클립을 이동·복제하고, 양쪽 끝을 자르고, 클립별로 음정을 ±24반음 조절할 수 있습니다. 구간 반복, 트랙별 볼륨/팬/음소거/솔로, 메트로놈, 실행 취소/다시 실행(Ctrl+Z / Ctrl+Shift+Z), Ctrl+휠 확대, **Export WAV**(전체 곡 또는 반복 구간, 24-bit)를 지원하고, 프로젝트는 PostgreSQL에 자동 저장됩니다.
+- **Arrangement View:** Ableton 방식의 마디/박자 타임라인 위에 트랙을 구성합니다. 샘플을 트랙에 끌어다 놓고, 스냅에 맞춰 클립을 이동·복제하고, 양쪽 끝을 자르고, **클립 루프**(자른 구간을 원하는 길이만큼 반복), 페이드, 리버스, 음정(±24반음 + cents), 복사/붙여넣기, 재생 위치에서 자르기, 드래그 다중 선택, Ableton처럼 겹친 클립 잘라내기, 트랙 순서 변경, 마커, 박자표, 마스터 게인과 피크 미터, 메트로놈, 실행 취소/다시 실행, **Export WAV**(전체 곡, 반복 구간, 트랙별 WAV)를 지원합니다. 프로젝트는 PostgreSQL에 자동 저장되고, 다른 탭에서 저장한 경우를 감지하며(조용히 덮어쓰지 않음), 실패한 저장은 다시 시도하고, 저장 전에 탭을 닫아도 편집 내용이 남습니다.
 - **BPM Sync:** warp가 켜진 클립은 프로젝트 템포를 따릅니다. BPM을 바꾸면 서버에서 음정을 유지한 채 time-stretch(Rubber Band)하고 결과를 캐시합니다. 렌더링이 끝나기 전에는 속도만 바꿔 재생해서 변경을 바로 들을 수 있습니다.
+- **모바일:** 모든 화면을 휴대폰에서 쓸 수 있습니다. 촘촘한 행, 하단 고정 재생/실행 바, 바텀 시트, 44 px 이상의 터치 영역, 핀치 확대, 길게 눌러 클립 끌기(스와이프는 스크롤)
 - **GPU 지원:** Docker를 통한 NVIDIA GPU 가속 지원(선택사항)
 
 ## 빠른 시작
@@ -71,12 +73,11 @@ docker compose -f docker-compose.gpu.yml up --build
 - **백엔드 API:** [http://localhost:8000](http://localhost:8000)
 
 ## 사용 방법
-1. **업로드:** 메인 페이지에서 오디오 파일을 선택하거나 YouTube URL을 붙여넣으세요. 필요하면 "주파수 복원" 옵션을 켜고 복원 모델을 선택하세요.
-2. **처리:** AI가 파일을 처리할 때까지 기다립니다 — 진행률 표시가 분리 단계, 복원이 켜져 있다면 복원 단계까지 보여줍니다.
-3. **결과:** 재생 버튼으로 모든 트랙을 들어보세요. 볼륨 조절, 트랙별 음소거/솔로, 트랙별 원본/복원본 전환, 스펙트로그램 확인, 원하는 트랙 다운로드가 가능합니다.
-4. **샘플 추출:** 트랙의 **Extract**를 누르고 파형 위를 드래그해 구간을 선택한 뒤, **Play selection**(필요하면 **Loop**)으로 그 구간만 정확히 들어 보고 이름을 정해 **Save sample**을 누르세요. 그 시점에 선택된 원본/복원본이 저장됩니다. 파형 위에서 **Ctrl**(macOS는 ⌘)을 누른 채 스크롤하면 좌우로 확대되어 정밀하게 선택할 수 있습니다. 모든 stem이 함께 확대·스크롤되고, **Fit**으로 되돌립니다.
-5. **라이브러리:** **Library** 탭에서 샘플을 둘러보고 BPM/키 보정, 태그 지정, 다운로드, 삭제를 할 수 있습니다. 이전 작업은 업로드 화면의 **Recent jobs**에 표시됩니다.
-6. **어레인지:** **Arrange** 탭에서 프로젝트를 만들고 BPM을 정한 뒤, 샘플 브라우저에서 샘플을 트랙으로 끌어다 놓으세요. BPM이 있는 클립은 프로젝트 템포에 맞춰 warp됩니다(클립별로 켜고 끌 수 있음). 먼저 라이브러리에서 샘플 BPM을 맞춰 두세요 — 대부분의 분석 오류는 ×2 / ÷2로 고칠 수 있습니다.
+1. **분리:** **Split** 화면에서 오디오 파일을 끌어다 놓거나 YouTube URL을 붙여넣고, 모델(최고 품질은 BS-Roformer, 속도는 htdemucs)과 필요하면 **Restore**를 고르세요. 작업은 오른쪽 목록에 실시간 진행률과 함께 쌓이고, 열어서 따라갈 수 있습니다.
+2. **결과:** Space로 재생/일시정지합니다. stem별 페이더, 음소거/솔로, stem별 또는 전체 원본/복원본 전환, 스펙트로그램, stem 또는 전체 zip 다운로드가 가능합니다.
+3. **샘플 추출:** stem의 **Extract**를 누르고 파형 위를 드래그하세요(휴대폰에서는 재생 위치에서 Set start / Set end). 시작/끝 입력, ←/→(Shift = 10 ms, Alt = 1박), Snap으로 다듬고 **Loop**로 확인합니다. **Save**는 그 stem의 현재 원본/복원본을, **Save mix**는 지금 들리는 stem들을 현재 볼륨으로 합쳐 저장합니다. −/+/Fit, Ctrl/⌘+휠, Z(선택 구간으로), 핀치로 확대합니다.
+4. **라이브러리:** ↑/↓(Auto가 켜져 있으면 바로 미리듣기), Space, L(반복)로 둘러보고, 인스펙터에서 이름·태그·BPM·키를 고칩니다. 행을 체크하면 일괄 작업, **Sync**는 프로젝트 템포로 미리듣기, **Add to Arrange**는 마지막 프로젝트에 샘플을 넣습니다.
+5. **어레인지:** 프로젝트를 만들고 BPM을 정한 뒤 샘플 브라우저에서 샘플을 트랙으로 끌어다 놓으세요(휴대폰에서는 샘플을 탭한 뒤 레인을 탭). BPM이 있는 클립은 프로젝트 템포에 맞춰 warp됩니다. 클립 인스펙터에서 **Loop**를 켜고 오른쪽 끝을 끌면 구간이 반복됩니다. 툴바에서 곡, 반복 구간, stem별 WAV를 내보낼 수 있습니다.
 
 ## 분리 모델
 
@@ -124,7 +125,7 @@ docker compose -f docker-compose.gpu.yml up --build
 - **Vite** - 빠른 빌드 도구 및 개발 서버
 - **Tailwind CSS** - 유틸리티 기반 스타일링 / 디자인 시스템
 - **Palnarium 디자인 시스템** - 흑백 토큰(ink/muted/paper/line/wash), Exo 2 + Pretendard(한글) 단일 굵기, 텍스트만으로 된 컨트롤
-- **WaveSurfer.js** - 오디오 파형 시각화
+- **Web Audio API** - stem 믹서 스트리밍 엔진(Range 요청으로 WAV를 조각 단위로 받아 모든 stem을 하나의 클록으로 재생)과 어레인지 엔진
 - **Axios** - API 요청을 위한 HTTP 클라이언트
 - **React Icons** - 아이콘 라이브러리
 
@@ -143,8 +144,11 @@ web_audio_splitter/
 │   ├── flashsr_infer.py     # 독립 실행형 FlashSR 추론 래퍼 (청크 처리, CPU/GPU)
 │   ├── audiosr_infer.py     # 독립 실행형 AudioSR 추론 래퍼
 │   ├── infer_cli.py         # 래퍼 공통 배치/진행률 처리 (작업당 모델 1회 로딩)
-│   ├── samples.py           # 샘플 라이브러리 엔드포인트 (추출 / 가져오기 / 목록 / 편집)
-│   ├── analysis.py          # 샘플 BPM + 키 분석
+│   ├── samples.py           # 샘플 라이브러리 엔드포인트 (추출 / 믹스 / 가져오기 / 목록 / 편집 / 렌더)
+│   ├── analysis.py          # 샘플과 곡의 BPM + 키 분석
+│   ├── jobs.py              # 작업 대기열 (기본 한 번에 하나) 및 취소
+│   ├── peaks.py             # 파형 peaks (JSON 캐시) — 믹서와 썸네일을 바로 그리기 위함
+│   ├── songs.py             # 곡 단위 BPM/키, 분리 후 분석
 │   ├── db.py / models.py    # SQLAlchemy 엔진/세션 및 ORM 모델
 │   ├── task_store.py        # 작업 영구 저장 (기존 메모리 dict 대체)
 │   ├── storage.py           # media/ 디렉터리 구성 및 경로 헬퍼
@@ -156,10 +160,11 @@ web_audio_splitter/
 │   └── media/               # 업로드/분리/복원된 오디오 및 캐시된 스펙트로그램
 ├── frontend/
 │   ├── src/
-│   │   ├── App.jsx          # 최상위 셸 / 단계 라우터
+│   │   ├── App.jsx          # 셸: 헤더, 라우트, 오류 경계
+│   │   ├── router.js        # 해시 라우트 (#/split, #/split/job/<id>, #/library?…, #/arrange/<id>)
 │   │   ├── api.js           # 백엔드 API 호출 통합 모듈
 │   │   ├── arrange/         # 어레인지: 데이터 모델 + 타이밍(project.js), Web Audio 엔진(engine.js), UI(ui/)
-│   │   ├── components/      # UploadScreen, Mixer, TrackRow, ProgressStages 등
+│   │   ├── components/      # Split 홈 + 작업 목록 (jobs/), 셸 (shell/), stem 믹서 + 추출 (result/), 라이브러리 (library/)
 │   │   └── main.jsx         # 애플리케이션 진입점
 │   ├── tailwind.config.js   # 디자인 토큰 (색상, 그림자, 애니메이션)
 │   ├── package.json         # Node.js 의존성
@@ -186,8 +191,8 @@ GPU 가속을 활성화하려면:
 3. GPU compose 파일로 실행: `docker compose -f docker-compose.gpu.yml up --build`
 
 ### 지원 오디오 포맷
-- MP3, WAV, FLAC, OGG, M4A, WMA
-- 최대 파일 크기: 사용 가능한 디스크 공간에 의해 제한
+- ffmpeg가 읽을 수 있는 모든 포맷: MP3, WAV, FLAC, OGG, M4A, AIFF, WMA… 그리고 영상 파일(오디오 트랙 사용)
+- 업로드는 `MAX_UPLOAD_MB`(기본 1 GB), 30분까지, 라이브러리 가져오기는 10분까지
 - 권장사항: 최상의 분리 결과를 위해 고품질 소스 파일 사용
 
 ## 문제 해결
@@ -224,6 +229,7 @@ GPU 가속을 활성화하려면:
 **문제: 데이터베이스 초기화**
 - 작업 기록과 샘플 메타데이터는 `pgdata` Docker 볼륨에 저장됩니다(샘플 오디오 파일은 `backend/media/samples/`에 있습니다).
 - 처음부터 다시 시작하려면 `docker compose -f docker-compose.gpu.yml down && docker volume rm web_audio_splitter_pgdata`(프로젝트 폴더 접두사에 맞게 조정)를 실행한 뒤 다시 띄우세요. 마이그레이션이 스키마를 다시 만듭니다.
+- **주의:** `docker compose down`은 데이터를 유지하지만, `docker compose down -v`는 이름 있는 볼륨인 데이터베이스(`pgdata`)와 내려받은 모델 캐시(`demucs_cache`)까지 삭제합니다.
 
 ### 성능 팁
 - **CPU 처리**: 3분 곡 기준 약 2-5분 소요
@@ -265,30 +271,40 @@ npm run dev
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `splitter` | `db` 서비스 접속 정보 |
 | `DATABASE_URL` | 위 값으로 구성 | 백엔드 DB 연결 문자열 (compose가 설정, Docker 없이 실행할 때는 직접 지정) |
 | `MEDIA_RETENTION_DAYS` | `0` | N일이 지난 작업(업로드, stem, 스펙트로그램)을 삭제합니다. 라이브러리 샘플은 별도 복사본이라 유지됩니다. `0` = 모두 보관 |
+| `MAX_CONCURRENT_JOBS` | `1` | 동시에 실행할 분리 작업 수, 나머지는 대기 (VRAM/CPU 여유가 있을 때만 늘리세요) |
+| `MAX_UPLOAD_MB` | `1024` | 업로드 최대 크기 |
+| `RENDER_CACHE_MB` | `4096` | time-stretch/피치 렌더 캐시의 디스크 상한 (가장 오래 쓰지 않은 것부터 삭제) |
 
 ### API 엔드포인트
-- `POST /upload` - 오디오 파일 업로드 (`file`, `model`, `recover`, `recovery_model`) → `{task_id}`
-- `POST /youtube/info` - YouTube URL 검증 및 메타데이터 조회
-- `POST /youtube/download` - 백그라운드 YouTube 다운로드 시작 (`url`, `model`, `recover`, `recovery_model`) → `{task_id}`
+- `POST /upload` - 오디오/영상 파일 업로드 (`file`, `model`, `recover`, `recovery_model`) → `{task_id}`; 오디오가 아니거나 너무 길면 `400`, 너무 크면 `413`
+- `POST /youtube/info` - YouTube URL 검증 및 메타데이터 조회 (재생목록, 라이브 스트림은 거부)
+- `POST /youtube/download` - 백그라운드 YouTube 다운로드 시작 (`url`, `model`, `recover`, `recovery_model`, `auto_split`) → `{task_id}`; `/status`가 `download_percent`를 알려줌
 - `POST /youtube/confirm/{task_id}` - 다운로드된 오디오 확인 및 처리 시작
 - `GET /youtube/preview/{task_id}` - 다운로드된 YouTube 오디오 미리듣기
-- `GET /status/{task_id}` - 작업 상태 폴링 (`step`(`separating`/`restoring`) 및 진행률 포함)
-- `GET /result/{task_id}` - 사용 가능한 트랙 및 복원본 목록 조회
-- `GET /download/{task_id}/{track_name}?variant=original|recovered` - 스템 다운로드
+- `GET /status/{task_id}` - 작업 상태 폴링: `step`(`separating`/`restoring`), 대기 순서, 시각, 진행률
+- `GET /result/{task_id}` - 트랙, 복원본, `derived_tracks`, 곡 BPM/키, 길이
+- `GET /download/{task_id}/{track_name}?variant=original|recovered` - 스템 다운로드/스트리밍 (Range 요청 지원)
+- `GET /peaks/{task_id}/{track_name}?variant=&resolution=` - 파형 peaks (초당 포인트 수, 캐시)
+- `GET /onsets/{task_id}/{track_name}?variant=` - 트랜지언트 시각 (스냅용)
 - `GET /spectrogram/{task_id}/{track_name}?variant=original|recovered` - 렌더링(및 캐시)된 스펙트로그램 PNG
-- `GET /tasks?limit=` - 최근 작업 목록 (최신순)
+- `GET /tasks/{task_id}/stems.zip?variant=` - 작업의 모든 stem을 zip 하나로 (스트리밍)
+- `GET /tasks?limit=&before=&q=&status=` - 작업 목록 (최신순, `in_flight` 포함, `before`로 이전 페이지)
 - `POST /tasks/{task_id}/retry` - 작업의 원본 음원을 다른 설정으로 다시 실행 (JSON: `model`, `recover`, `recovery_model`) → 새 작업의 `{task_id}`
+- `POST /tasks/{task_id}/cancel` - 대기 중이거나 실행 중인 작업 취소
 - `DELETE /tasks/{task_id}` - 작업과 파일 삭제 (실행 중이면 `409`)
-- `POST /samples` - stem에서 샘플 추출 (JSON: `task_id`, `track`, `variant`, `start_sec`, `end_sec`, `name?`, `tags?`)
+- `POST /samples` - stem에서 샘플 추출 (JSON: `task_id`, `track`, `variant`, `start_sec`, `end_sec`, `name?`, `tags?`, 그리고 `snap_to_zero`, `fade_in_ms`, `fade_out_ms`, `normalize`, `reverse`, `bit_depth`, `sample_rate`, `mono`)
+- `POST /samples/mix` - 위와 같지만 여러 stem을 stem별 게인으로 합쳐서 (`stems: [{track, variant, gain}]`)
 - `POST /samples/import` - 오디오 파일을 라이브러리로 가져오기 (`file`, `name?`, `tags?`)
-- `GET /samples?q=&tag=&key=&bpm_min=&bpm_max=&sort=` - 샘플 목록/검색
+- `GET /samples?q=&tags=&key=&bpm_min=&bpm_max=&sort=&task_id=&limit=&offset=` - 샘플 목록/검색 → `{samples, matched, total}`
+- `POST /samples/export` - 지정한 샘플들의 zip (JSON `{ids}`); `POST /samples/analyze` - 여러 샘플 재분석 (`{ids}`, 비우면 전체)
+- `GET /samples/{id}/peaks?points=` - 썸네일 peaks
 - `GET /samples/tags` - 태그별 사용 횟수
 - `GET /samples/{id}` / `PATCH /samples/{id}` / `DELETE /samples/{id}` - 조회, 수정(`name`, `tags`, `bpm`, `key`; `null`을 보내면 bpm/key가 분석값으로 돌아감), 삭제
 - `POST /samples/{id}/analyze` - BPM/키 재분석
 - `GET /samples/{id}/audio` - 샘플 WAV
-- `GET /samples/{id}/render?bpm=&semitones=` - `bpm`으로 time-stretch / 피치 시프트한 샘플 (한 번 렌더링 후 캐시)
+- `GET /samples/{id}/render?bpm=&semitones=&cents=` - `bpm`으로 time-stretch / 피치 시프트한 샘플 (한 번 렌더링 후 캐시); `DELETE /samples/renders/cache`로 캐시 비우기
 - `GET /projects` / `POST /projects` - 어레인지 프로젝트 목록 / 생성
-- `GET /projects/{id}` / `PUT /projects/{id}` / `DELETE /projects/{id}` - 조회(샘플 정보 포함), 문서 전체 저장(트랙 + 클립), 삭제
+- `GET /projects/{id}` / `PUT /projects/{id}` / `DELETE /projects/{id}` - 조회(샘플 정보 포함), 문서 전체 저장(트랙, 클립, 마커; `base_version`을 보내면 다른 탭이 먼저 저장했을 때 `409`와 현재 문서를 돌려줌), 삭제
 - 프로젝트에서 사용 중인 샘플을 삭제하면 `409`를 반환합니다
 
 ## 크레딧
@@ -302,7 +318,6 @@ npm run dev
 - [FastAPI](https://fastapi.tiangolo.com/) - 백엔드 프레임워크
 - [React](https://react.dev/) - 프론트엔드 프레임워크
 - [Tailwind CSS](https://tailwindcss.com/) - 스타일링
-- [WaveSurfer.js](https://wavesurfer-js.org/) - 오디오 시각화
 - [PostgreSQL](https://www.postgresql.org/) - 데이터베이스
 - [librosa](https://librosa.org/) - 템포 및 키 분석
 - [pedalboard](https://github.com/spotify/pedalboard) / [Rubber Band](https://breakfastquay.com/rubberband/) - time-stretch 및 피치 시프트
