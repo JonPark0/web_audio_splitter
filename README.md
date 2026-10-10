@@ -26,7 +26,7 @@ A web application to separate audio files into individual tracks (Vocals, Drums,
 - **Arrangement View:** Ableton-style tracks on a bar/beat timeline — drag samples onto tracks, move/duplicate clips with snapping, trim either edge, **clip loop** (repeat the trimmed region to any length), fades, reverse, pitch (±24 semitones + cents), copy/paste, split at playhead, rubber-band selection, overlapping clips truncated like Ableton, track reorder, markers, time signature, master gain and peak meters, metronome, undo/redo, and **Export WAV** (whole song, loop region, or one WAV per track). Projects autosave to PostgreSQL; a save from another tab is detected (no silent overwrite), failed saves retry, and unsaved edits survive closing the tab.
 - **BPM Sync:** Warped clips follow the project tempo. Changing the BPM time-stretches them server-side (Rubber Band, pitch preserved) and caches the result; until a render arrives the clip plays sped up/down so the change is heard immediately.
 - **Phone, tablet and desktop:** Every screen works on a phone — compact rows, a fixed bottom transport/CTA bar, bottom sheets, ≥44 px touch targets, pinch-zoom, and long-press to drag clips (a swipe scrolls). Layout follows the device, not just the width: a landscape phone keeps the phone layout, an iPad in landscape gets the tablet layout, and any touch screen (touch laptops, iPads with a trackpad) gets finger-sized targets. Playback is heard with the iPhone's silent switch on and pauses cleanly after a call or Siri; content clears the notch in landscape; Safari trackpad pinch zooms waveforms; keyboard shortcuts work with a Hangul layout active.
-- **Recoverable uploads:** an upload cut off by a locked screen or a dropped connection can be retried in place, the screen is kept awake while uploading, and files over the server's limit (`GET /limits`) are refused before they're sent.
+- **Resumable uploads:** files go up in chunks, so an upload cut off by a locked screen or a dropped connection resumes where it stopped (by itself, or with Retry), the screen is kept awake while uploading, and files over the server's limit (`GET /limits`) are refused before they're sent.
 - **GPU Support:** Optional NVIDIA GPU acceleration via Docker.
 
 ## Quick Start
@@ -278,6 +278,11 @@ npm run dev
 
 ### API Endpoints
 - `POST /upload` - Upload an audio/video file (`file`, `model`, `recover`, `recovery_model`) → `{task_id}`; `400` not audio / too long, `413` too large
+- `POST /uploads` - Start a resumable (chunked) upload (form: `filename`, `size`, `model`, `recover`, `recovery_model`) → `{upload_id, received, size, chunk_size}`; `413` too large
+- `PUT /uploads/{id}` - Append a chunk (multipart: `offset`, `chunk`) → `{received}`; `409` + `{received}` when `offset` isn't where the upload stands
+- `GET /uploads/{id}` - Where an upload stands → `{received, size, task_id}`; `DELETE /uploads/{id}` drops it (sessions idle for a day are purged)
+- `POST /uploads/{id}/complete` - The same checks as `POST /upload`, then the job → `{task_id}` (repeatable: the same job again)
+- `GET /limits` - Upload limits `{max_upload_mb, max_duration_seconds}`
 - `POST /youtube/info` - Validate a YouTube URL and return metadata (playlists and live streams are refused)
 - `POST /youtube/download` - Start a background YouTube download (`url`, `model`, `recover`, `recovery_model`, `auto_split`) → `{task_id}`; `/status` reports `download_percent`
 - `POST /youtube/confirm/{task_id}` - Confirm the downloaded audio and start processing

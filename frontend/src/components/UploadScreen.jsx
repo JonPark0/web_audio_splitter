@@ -64,7 +64,10 @@ function itemStateText(item) {
     case 'waiting':
       return 'Waiting';
     case 'uploading':
+      if (item.reconnecting) return `Reconnecting... · ${formatMB(item.loaded)} / ${formatMB(item.total)} MB`;
       return `${formatMB(item.loaded)} / ${formatMB(item.total)} MB${item.rate ? ` · ${formatMB(item.rate)} MB/s` : ''}`;
+    case 'paused':
+      return `Paused · ${formatMB(item.loaded)} / ${formatMB(item.total)} MB`;
     case 'checking':
       return 'Checking file...';
     case 'done':
@@ -79,9 +82,10 @@ function itemStateText(item) {
 /**
  * "New split": source (files or a YouTube link), separation model,
  * restoration, and the CTA. Files upload one after another with byte
- * progress and can be cancelled; every file becomes its own job in the jobs
- * list next to it. Settings are remembered between visits. Files can be
- * dropped anywhere on the page. On phones the CTA is a fixed bottom bar;
+ * progress, resume after a dropped connection and can be cancelled; every
+ * file becomes its own job in the jobs list next to it. Settings are
+ * remembered between visits. Files can be dropped anywhere on the page. On
+ * phones the CTA is a fixed bottom bar;
  * `onBarHeight(px)` reports its height (0 when it isn't fixed) so the page
  * can pad for it.
  */
@@ -296,9 +300,9 @@ export default function UploadScreen({ onBarHeight }) {
   const batchTotal = active ? items.filter((i) => i.batch === active.batch).length : 0;
   const batchIndex = active ? items.filter((i) => i.batch === active.batch && (i.state === 'done' || i.state === 'error')).length + 1 : 0;
   const progressValue = active ? (active.total ? Math.min(1, active.loaded / active.total) : 'indeterminate') : ytBusy ? 'indeterminate' : null;
-  // Nothing left to stop while the last file is being checked (it is on
-  // the server already and becomes a job either way).
-  const canCancel = uploading && !(active?.state === 'checking' && !items.some((i) => i.state === 'waiting'));
+  // Nothing left to stop once the last file is committed (it is on the
+  // server already and becomes a job either way).
+  const canCancel = uploading && !(active?.committed && !items.some((i) => i.state === 'waiting'));
 
   // Numbers and links before names, so the phone bar's two-line clamp only
   // ever cuts a long file or video title (the explanation after a title
@@ -418,11 +422,11 @@ export default function UploadScreen({ onBarHeight }) {
                   <li key={item.key} className="flex min-h-7 flex-wrap items-center gap-x-3">
                     <span className="min-w-0 flex-1 truncate">{item.file.name}</span>
                     {item.state !== 'error' && <span className="shrink-0 tabular-nums text-muted">{itemStateText(item)}</span>}
-                    {item.state === 'error' && item.retryable && (
+                    {((item.state === 'error' && item.retryable) || item.state === 'paused') && (
                       <TextButton
                         className="shrink-0"
                         label="Retry"
-                        aria-label={`Retry ${item.file.name}`}
+                        aria-label={`Retry ${item.file.name}${item.state === 'paused' ? ' now' : ''}`}
                         onClick={() => retryItem(item.key)}
                       >
                         Retry
@@ -446,6 +450,12 @@ export default function UploadScreen({ onBarHeight }) {
                       <span className="basis-full pb-1">
                         <span className="text-muted">Failed — </span>
                         {item.error}
+                      </span>
+                    )}
+                    {item.state === 'paused' && (
+                      <span className="basis-full pb-1">
+                        <span className="text-muted">Upload paused — </span>
+                        {item.error} It resumes where it stopped, by itself or on Retry.
                       </span>
                     )}
                   </li>
