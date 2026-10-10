@@ -223,6 +223,10 @@ To enable GPU acceleration:
   - Increase `DEMUCS_SHIFTS` if using GPU
   - Try different Demucs models, or BS-Roformer, from the model selector
 
+**Issue: the backend build fails downloading a checkpoint with `Read timed out` / `Max retries exceeded` (e.g. `hf_hub_download(... 'FlashSR_weights' ...)`)**
+- Cause: a slow or stalling connection to Hugging Face's CDN. The build now allows 120 s per read (`HF_HUB_DOWNLOAD_TIMEOUT`) and retries each checkpoint prefetch up to 5 times, resuming the partial file, so running the build again usually gets through; layers that already finished stay cached.
+- If FlashSR's files still won't come through, build with `PREFETCH_FLASHSR=false` in `.env` (or `--build-arg PREFETCH_FLASHSR=false`): FlashSR is opt-in and downloads them on its first use instead.
+
 **Issue: recovery hangs for minutes then fails with a Hugging Face 401/429/"cannot find the requested files in the local cache" error**
 - Cause: the `demucs_cache` Docker volume (mounted at `/root/.cache`, holding Apollo/AudioSR/FlashSR/BS-Roformer's downloaded checkpoints) is a **named volume** — Docker only seeds it from the image once, the first time it's created. If that volume already existed from before a model was added to the image (e.g. you built once, then pulled a newer version of this project with a new model), the container keeps using the old, incomplete volume instead of the new image's baked-in cache, and falls back to a slow/rate-limited runtime download instead of using the pre-warmed one.
 - Solution: `docker compose rm -sf backend && docker volume rm web_audio_splitter_demucs_cache` (adjust the volume name to your project folder's prefix if different), then `docker compose up -d backend` to let it reseed fresh from the current image.

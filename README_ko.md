@@ -223,6 +223,10 @@ GPU 가속을 활성화하려면:
   - GPU 사용 시 `DEMUCS_SHIFTS`를 증가시키세요
   - 모델 선택기에서 다른 Demucs 모델이나 BS-Roformer를 시도해보세요
 
+**문제: 백엔드 빌드가 체크포인트를 받다가 `Read timed out` / `Max retries exceeded`로 실패함 (예: `hf_hub_download(... 'FlashSR_weights' ...)`)**
+- 원인: Hugging Face CDN과의 연결이 느리거나 중간에 멈추는 경우입니다. 빌드는 한 번의 읽기에 120초까지 기다리고(`HF_HUB_DOWNLOAD_TIMEOUT`), 체크포인트마다 받은 부분부터 이어서 최대 5번 다시 시도하므로 빌드를 다시 실행하면 대개 넘어갑니다. 이미 끝난 단계는 캐시에 남습니다.
+- 그래도 FlashSR 파일을 받지 못하면 `.env`에 `PREFETCH_FLASHSR=false`를 넣고(또는 `--build-arg PREFETCH_FLASHSR=false`) 빌드하세요. FlashSR은 선택 기능이라 처음 쓸 때 파일을 내려받습니다.
+
 **문제: 복원 단계가 몇 분간 멈춰 있다가 Hugging Face 401/429 또는 "cannot find the requested files in the local cache" 오류로 실패함**
 - 원인: `/root/.cache`에 마운트되는 `demucs_cache` Docker 볼륨(Apollo/AudioSR/FlashSR/BS-Roformer의 다운로드된 체크포인트 저장)은 **named volume**입니다 — Docker는 볼륨이 처음 생성될 때만 이미지 내용으로 초기화합니다. 새 모델이 이미지에 추가되기 전에 이 볼륨이 이미 존재했다면(예: 한 번 빌드한 뒤 새 모델이 추가된 최신 버전을 받은 경우), 컨테이너는 새 이미지에 미리 준비된 캐시 대신 기존의 불완전한 볼륨을 계속 사용하게 되어, 느리거나 rate-limit에 걸리는 런타임 다운로드로 넘어가게 됩니다.
 - 해결방법: `docker compose rm -sf backend && docker volume rm web_audio_splitter_demucs_cache`(프로젝트 폴더 접두사가 다르면 볼륨 이름을 맞게 조정) 실행 후 `docker compose up -d backend`로 현재 이미지 기준으로 새로 채워지도록 하세요.
