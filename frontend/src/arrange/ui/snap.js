@@ -23,13 +23,14 @@ export function stepZoom(z, dir) {
 /** Lane heights the user can pick (desktop/tablet); phones use PHONE_LANE. */
 export const LANE_HEIGHTS = [40, 64, 88];
 export const DEFAULT_LANE = 64;
-export const PHONE_LANE = 56;
+// Phone: the track name over a row of 44 px M/S (TrackHeader).
+export const PHONE_LANE = 64;
 export const RULER_HEIGHT = 28;
 export const RULER_HEIGHT_TOUCH = 44; // the ruler is the only way to seek by touch
 export const NEW_TRACK_ROW_HEIGHT = 44; // drop zone / "Add track" below the last track
 
-/** Track header column width per layout. */
-export const HEADER_WIDTH = { desktop: 192, tablet: 112, phone: 72 };
+/** Track header column width per layout (phone: 44 px M + S, then the meter). */
+export const HEADER_WIDTH = { desktop: 192, tablet: 112, phone: 96 };
 
 export const SNAP_OPTIONS = [
   { value: 'bar', label: '1 bar' },

@@ -17,9 +17,11 @@ const PENDING_STYLE = {
  *
  * Shows: name, waveform (loop repeats dimmed, reversed mirrored), fade
  * ramps, and a hatch while its server render is still on the way.
- * A swipe that starts here scrolls the timeline (touch-action pan); the
- * Timeline lifts the clip only after a long-press, and shows it `dragging`
- * from that moment.
+ * A swipe that starts here scrolls the timeline (`touchAction` pan, none
+ * while a pen is in use); the Timeline lifts the clip only after a
+ * long-press, and shows it `dragging` from that moment.
+ * Keyboard: the Timeline picks the one clip with tabIndex 0 and draws the
+ * focus ring; screen readers get name, `where` and the selected state.
  */
 export default memo(function ClipView({
   clip,
@@ -39,7 +41,12 @@ export default memo(function ClipView({
   coarse,
   handlePx,
   engine,
+  where,
+  tabIndex = -1,
+  touchAction = 'pan-x pan-y',
   onClipPointerDown,
+  onFocus,
+  onBlur,
 }) {
   const name = sample?.name || 'Missing sample';
   const showLabel = width >= 24 && height >= 34;
@@ -60,17 +67,19 @@ export default memo(function ClipView({
     <div
       data-clip={clip.id}
       role="button"
-      tabIndex={-1}
+      tabIndex={tabIndex}
       aria-pressed={selected}
-      aria-label={`Clip ${name}${note ? ` (${note})` : ''}`}
+      aria-label={`Clip ${name}${where ? `, ${where}` : ''}${note ? ` (${note})` : ''}`}
       title={note ? `${name} — ${note}` : name}
       onPointerDown={(e) => onClipPointerDown(e, clip, 'move')}
+      onFocus={onFocus}
+      onBlur={onBlur}
       // Edge drawn as an inset ink outline (no shadows in the system); a
       // selected clip thickens it like a focused field.
       className={`absolute overflow-hidden bg-wash outline outline-ink ${coarse ? '' : 'cursor-grab'} ${
         selected ? 'z-10 outline-2 -outline-offset-2' : 'outline-1 -outline-offset-1'
       } ${dimmed ? 'opacity-55' : ''} ${dragging ? 'z-20 cursor-grabbing opacity-80' : ''}`}
-      style={{ left, top, width: Math.max(2, width), height, touchAction: 'pan-x pan-y' }}
+      style={{ left, top, width: Math.max(2, width), height, touchAction }}
     >
       {showLabel && (
         <div
