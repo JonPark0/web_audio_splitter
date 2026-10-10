@@ -63,6 +63,53 @@ export function uploadFile({ file, model, recover, recoveryModel, onProgress, si
 }
 
 /**
+ * Resumable uploads: createUpload → uploadChunk for each slice (offset = the
+ * bytes the server has) → completeUpload → { task_id }. A chunk at the wrong
+ * offset gets 409 with { received }, the place to carry on from; getUpload
+ * says the same after a reconnect. completeUpload runs the checks of
+ * uploadFile and can be repeated (same task_id). Servers without /uploads
+ * answer createUpload with 404/405: use uploadFile.
+ */
+export function createUpload({ file, model, recover, recoveryModel, signal }) {
+  return axios.post(
+    `${API_BASE}/uploads`,
+    new URLSearchParams({
+      filename: file.name,
+      size: String(file.size),
+      model,
+      recover: String(recover),
+      recovery_model: recoveryModel,
+    }),
+    { signal, timeout: 30000 }
+  );
+}
+
+// `chunk` is a Blob slice of the file, never read into memory here.
+export function uploadChunk(uploadId, offset, chunk, { onProgress, signal } = {}) {
+  const formData = new FormData();
+  formData.append('offset', String(offset));
+  formData.append('chunk', chunk, 'chunk');
+  return axios.put(`${API_BASE}/uploads/${uploadId}`, formData, {
+    signal,
+    onUploadProgress: onProgress ? (e) => onProgress(e.loaded) : undefined,
+  });
+}
+
+// → { received, size, task_id (once completed) }
+export function getUpload(uploadId, { signal } = {}) {
+  return axios.get(`${API_BASE}/uploads/${uploadId}`, { signal, timeout: 30000 });
+}
+
+export function completeUpload(uploadId, { signal } = {}) {
+  return axios.post(`${API_BASE}/uploads/${uploadId}/complete`, null, { signal, timeout: 120000 });
+}
+
+// Drop an unfinished upload's bytes (Cancel).
+export function discardUpload(uploadId) {
+  return axios.delete(`${API_BASE}/uploads/${uploadId}`);
+}
+
+/**
  * The server's limits, { max_upload_mb, max_duration_seconds }, fetched once.
  * Resolves null when the server has no /limits (older backend) — the upload
  * itself still enforces them; any other failure is retried next call.

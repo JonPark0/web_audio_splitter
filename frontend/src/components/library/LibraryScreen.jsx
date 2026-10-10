@@ -367,17 +367,9 @@ export default function LibraryScreen() {
     }
   };
 
-  // One WAV, fetched so it keeps its BPM/key name - a moment on a long
-  // sample or a slow link, after the menu/sheet has already closed, so say
-  // so. Taps while it's on its way are ignored (they saved duplicates).
-  const download = (e, sample) => {
-    const name = downloadName(sample);
-    const pending = downloadAsNamed(e, sampleAudioUrl(sample), name);
-    if (!pending) return;
-    const note = { message: `Downloading ${name}…`, ms: 60000 };
-    setToast(note);
-    pending.finally(() => setToast((t) => (t === note ? null : t)));
-  };
+  // One WAV under its BPM/key name, saved by the browser itself (its own
+  // download progress; a double tap doesn't save it twice).
+  const download = (e, sample) => downloadAsNamed(e, sampleAudioUrl(sample), downloadName(sample));
 
   const handlers = {
     rowClick(sample, e) {

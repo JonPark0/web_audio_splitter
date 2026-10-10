@@ -26,7 +26,7 @@ Meta Demucs AI 모델을 사용하여 오디오 파일을 개별 트랙(보컬, 
 - **Arrangement View:** Ableton 방식의 마디/박자 타임라인 위에 트랙을 구성합니다. 샘플을 트랙에 끌어다 놓고, 스냅에 맞춰 클립을 이동·복제하고, 양쪽 끝을 자르고, **클립 루프**(자른 구간을 원하는 길이만큼 반복), 페이드, 리버스, 음정(±24반음 + cents), 복사/붙여넣기, 재생 위치에서 자르기, 드래그 다중 선택, Ableton처럼 겹친 클립 잘라내기, 트랙 순서 변경, 마커, 박자표, 마스터 게인과 피크 미터, 메트로놈, 실행 취소/다시 실행, **Export WAV**(전체 곡, 반복 구간, 트랙별 WAV)를 지원합니다. 프로젝트는 PostgreSQL에 자동 저장되고, 다른 탭에서 저장한 경우를 감지하며(조용히 덮어쓰지 않음), 실패한 저장은 다시 시도하고, 저장 전에 탭을 닫아도 편집 내용이 남습니다.
 - **BPM Sync:** warp가 켜진 클립은 프로젝트 템포를 따릅니다. BPM을 바꾸면 서버에서 음정을 유지한 채 time-stretch(Rubber Band)하고 결과를 캐시합니다. 렌더링이 끝나기 전에는 속도만 바꿔 재생해서 변경을 바로 들을 수 있습니다.
 - **휴대폰·태블릿·데스크탑:** 모든 화면을 휴대폰에서 쓸 수 있습니다. 촘촘한 행, 하단 고정 재생/실행 바, 바텀 시트, 44 px 이상의 터치 영역, 핀치 확대, 길게 눌러 클립 끌기(스와이프는 스크롤). 레이아웃은 화면 폭만이 아니라 기기에 맞춰 정해집니다. 가로로 든 휴대폰은 휴대폰 레이아웃, 가로 iPad는 태블릿 레이아웃을 쓰고, 터치가 되는 모든 화면(터치 노트북, 트랙패드를 연결한 iPad)에서 손가락 크기의 터치 영역을 씁니다. iPhone 무음 모드에서도 재생 소리가 나고, 통화나 Siri로 끊기면 깔끔하게 일시정지됩니다. 가로 화면에서 노치를 피하고, Safari 트랙패드 핀치로 파형을 확대하며, 한글 자판 상태에서도 단축키가 동작합니다.
-- **업로드 복구:** 화면 잠금이나 연결 끊김으로 실패한 업로드는 그 자리에서 다시 시도할 수 있고, 업로드 중에는 화면이 꺼지지 않으며, 서버 한도(`GET /limits`)를 넘는 파일은 보내기 전에 거절합니다.
+- **이어 올리기:** 파일을 조각으로 나눠 올려서, 화면 잠금이나 연결 끊김으로 끊긴 업로드가 멈춘 곳부터 이어집니다(자동으로, 또는 다시 시도로). 업로드 중에는 화면이 꺼지지 않으며, 서버 한도(`GET /limits`)를 넘는 파일은 보내기 전에 거절합니다.
 - **GPU 지원:** Docker를 통한 NVIDIA GPU 가속 지원(선택사항)
 
 ## 빠른 시작
@@ -278,6 +278,11 @@ npm run dev
 
 ### API 엔드포인트
 - `POST /upload` - 오디오/영상 파일 업로드 (`file`, `model`, `recover`, `recovery_model`) → `{task_id}`; 오디오가 아니거나 너무 길면 `400`, 너무 크면 `413`
+- `POST /uploads` - 이어 올리기(조각) 업로드 시작 (form: `filename`, `size`, `model`, `recover`, `recovery_model`) → `{upload_id, received, size, chunk_size}`; 너무 크면 `413`
+- `PUT /uploads/{id}` - 조각 추가 (multipart: `offset`, `chunk`) → `{received}`; `offset`이 받은 위치와 다르면 `409` + `{received}`
+- `GET /uploads/{id}` - 업로드가 어디까지 왔는지 → `{received, size, task_id}`; `DELETE /uploads/{id}`로 버리기 (하루 동안 손대지 않은 세션은 정리됨)
+- `POST /uploads/{id}/complete` - `POST /upload`와 같은 검사 후 작업 생성 → `{task_id}` (다시 보내도 같은 작업)
+- `GET /limits` - 업로드 한도 `{max_upload_mb, max_duration_seconds}`
 - `POST /youtube/info` - YouTube URL 검증 및 메타데이터 조회 (재생목록, 라이브 스트림은 거부)
 - `POST /youtube/download` - 백그라운드 YouTube 다운로드 시작 (`url`, `model`, `recover`, `recovery_model`, `auto_split`) → `{task_id}`; `/status`가 `download_percent`를 알려줌
 - `POST /youtube/confirm/{task_id}` - 다운로드된 오디오 확인 및 처리 시작
@@ -302,7 +307,7 @@ npm run dev
 - `GET /samples/tags` - 태그별 사용 횟수
 - `GET /samples/{id}` / `PATCH /samples/{id}` / `DELETE /samples/{id}` - 조회, 수정(`name`, `tags`, `bpm`, `key`; `null`을 보내면 bpm/key가 분석값으로 돌아감), 삭제
 - `POST /samples/{id}/analyze` - BPM/키 재분석
-- `GET /samples/{id}/audio` - 샘플 WAV
+- `GET /samples/{id}/audio?download=` - 샘플 WAV; `download=<이름>`을 주면 그 이름의 첨부 파일로 보냄
 - `GET /samples/{id}/render?bpm=&semitones=&cents=` - `bpm`으로 time-stretch / 피치 시프트한 샘플 (한 번 렌더링 후 캐시); `DELETE /samples/renders/cache`로 캐시 비우기
 - `GET /projects` / `POST /projects` - 어레인지 프로젝트 목록 / 생성
 - `GET /projects/{id}` / `PUT /projects/{id}` / `DELETE /projects/{id}` - 조회(샘플 정보 포함), 문서 전체 저장(트랙, 클립, 마커; `base_version`을 보내면 다른 탭이 먼저 저장했을 때 `409`와 현재 문서를 돌려줌), 삭제

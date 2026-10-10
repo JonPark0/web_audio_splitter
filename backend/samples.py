@@ -252,8 +252,8 @@ def _process(data, sr: int, opts: SampleCreate):
     return data
 
 
-def _safe_filename(name: str, fallback: str = "sample") -> str:
-    cleaned = "".join(c if c.isalnum() or c in " ._-()" else "_" for c in name).strip(" .")
+def _safe_filename(name: str, fallback: str = "sample", keep: str = "") -> str:
+    cleaned = "".join(c if c.isalnum() or c in " ._-()" + keep else "_" for c in name).strip(" .")
     return cleaned or fallback
 
 
@@ -710,12 +710,26 @@ def clear_render_cache():
 
 
 @router.get("/{sample_id}/audio")
-def sample_audio(sample_id: str):
+def sample_audio(sample_id: str, download: Optional[str] = Query(default=None, max_length=300)):
+    """The sample's WAV. With ?download=<name> it comes as an attachment
+    under that name (the library's "<name>_<bpm>bpm_<key>.wav"), so a plain
+    link saves it and the browser streams it to disk, instead of the page
+    fetching the whole file into a blob first (which mobile browsers handle
+    badly)."""
     with session_scope() as session:
         sample = _get_or_404(session, sample_id)
         path, name = Path(sample.file_path), sample.name
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Sample audio missing")
+    if download is not None:
+        # "#" kept: it's the sharp in a key ("C#min").
+        stem = _safe_filename(download, fallback=_safe_filename(name), keep="#")
+        if stem.lower().endswith(".wav"):
+            stem = stem[:-4].rstrip(" .") or _safe_filename(name)
+        return FileResponse(
+            path, media_type="audio/wav", headers=IMMUTABLE_CACHE_HEADERS,
+            filename=f"{stem}.wav", content_disposition_type="attachment",
+        )
     # Named after the sample, for downloads; "inline" so <audio> still plays it.
     return FileResponse(
         path, media_type="audio/wav", headers=IMMUTABLE_CACHE_HEADERS,
