@@ -1,7 +1,9 @@
 import React, { memo, useRef, useState } from 'react';
 import { FiMoreHorizontal } from 'react-icons/fi';
 import TextButton from '../../components/TextButton';
+import { ResetValue } from './fields';
 import InlineName from './InlineName';
+import { useCoarsePointer } from './layout';
 import { MeterBar } from './Meters';
 import { Menu } from './Overlay';
 import { MIN_DB, dbToGain, formatDb, gainToDb } from './snap';
@@ -12,15 +14,22 @@ function formatPan(pan) {
   return v < 0 ? `L${-v}` : `R${v}`;
 }
 
-/** Mute / solo toggles; `big` = 44 px touch targets. */
-function MuteSolo({ track, set, big, className = '' }) {
-  // `!`: the global coarse-pointer rule makes every .link 44×44, and two of
-  // those plus the name don't fit the phone's 72 px column / 56 px lane.
-  const cls = big
-    ? 'h-[38px] !min-h-[38px] !min-w-[34px] items-center justify-center sm:h-auto sm:!min-h-[44px] sm:!min-w-[44px]'
-    : 'min-w-[16px] coarse:min-h-[44px] coarse:min-w-[32px]';
+// Per layout, not per viewport width: a landscape phone is 'phone' at 844 px.
+//   phone   38 px: two of them and the name fit the 72 px column / 56 px lane
+//           (`!` beats the global 44 px coarse rule for .link)
+//   tablet  44 px on touch, compact with a mouse
+//   desktop inline with the name
+const MS_SIZE = {
+  phone: 'h-[38px] !min-h-[38px] !min-w-[34px] items-center justify-center',
+  tablet: 'min-h-[24px] min-w-[28px] items-center justify-center',
+  desktop: 'min-w-[16px] coarse:min-h-[44px] coarse:min-w-[32px]',
+};
+
+/** Mute / solo toggles. */
+function MuteSolo({ track, set, size = 'desktop', className = '' }) {
+  const cls = MS_SIZE[size];
   return (
-    <div className={`flex shrink-0 items-center ${big ? 'gap-0' : 'gap-2'} text-caption ${className}`}>
+    <div className={`flex shrink-0 items-center ${size === 'desktop' ? 'gap-2' : 'gap-0'} text-caption ${className}`}>
       <TextButton
         muted
         current={track.muted}
@@ -49,10 +58,13 @@ function MuteSolo({ track, set, big, className = '' }) {
   );
 }
 
-/** Volume as a dB fader (equal travel = equal loudness step). */
+/**
+ * Volume as a dB fader (equal travel = equal loudness step). The readout
+ * resets to 0 dB when tapped (double-click on the slider still does).
+ */
 export function VolumeSlider({ track, set, showValue = true, className = '' }) {
   return (
-    <label className={`flex min-w-0 items-center gap-1.5 text-caption text-muted ${className}`} title="Volume (double-click resets)">
+    <div className={`flex min-w-0 items-center gap-1.5 text-caption text-muted ${className}`} title="Volume (double-click or tap the value to reset)">
       <input
         type="range"
         min={MIN_DB}
@@ -65,14 +77,19 @@ export function VolumeSlider({ track, set, showValue = true, className = '' }) {
         aria-label={`${track.name} volume`}
         aria-valuetext={formatDb(track.volume)}
       />
-      {showValue && <span className="w-[52px] shrink-0 text-right tabular-nums text-ink">{formatDb(track.volume)}</span>}
-    </label>
+      {showValue && (
+        <ResetValue onReset={() => set({ volume: 1 })} label={`Reset ${track.name} volume to 0 dB`} className="w-[52px]">
+          {formatDb(track.volume)}
+        </ResetValue>
+      )}
+    </div>
   );
 }
 
+/** Pan; the readout centres it when tapped. */
 export function PanSlider({ track, set, className = '' }) {
   return (
-    <label className={`flex min-w-0 items-center gap-1.5 text-caption text-muted ${className}`} title="Pan (double-click centres)">
+    <div className={`flex min-w-0 items-center gap-1.5 text-caption text-muted ${className}`} title="Pan (double-click or tap the value to centre)">
       <input
         type="range"
         min="-1"
@@ -83,9 +100,12 @@ export function PanSlider({ track, set, className = '' }) {
         onDoubleClick={() => set({ pan: 0 })}
         className="slider min-w-0 flex-1 coarse:h-11"
         aria-label={`${track.name} pan`}
+        aria-valuetext={formatPan(track.pan)}
       />
-      <span className="w-7 shrink-0 text-right tabular-nums text-ink">{formatPan(track.pan)}</span>
-    </label>
+      <ResetValue onReset={() => set({ pan: 0 })} label={`Centre ${track.name} pan`} className="w-7 coarse:!min-w-[32px]">
+        {formatPan(track.pan)}
+      </ResetValue>
+    </div>
   );
 }
 
@@ -93,7 +113,9 @@ export function PanSlider({ track, set, className = '' }) {
  * Track header row (left column), same height as its lane.
  *   desktop: name, M/S, menu; volume (dB) + pan as the lane height allows;
  *            drag the grip to reorder.
- *   tablet:  name over 44 px M/S; the name opens the track sheet.
+ *            On touch a name renames only once its track is selected.
+ *   tablet:  name over M/S (44 px on touch; side by side in a small lane
+ *            with a mouse); the name opens the track sheet.
  *   phone:   name over M/S in 72 px; the name opens the track sheet.
  * A peak meter runs down the right edge.
  */
@@ -116,6 +138,8 @@ export default memo(function TrackHeader({
   const [asking, setAsking] = useState(false);
   const [dragDy, setDragDy] = useState(null);
   const menuBtn = useRef(null);
+  const nameRef = useRef(null);
+  const coarse = useCoarsePointer();
   const clipCount = track.clips.length;
   // `coalesce` groups a slider scrub into one undo step.
   const set = (patch, coalesce) => onUpdate(track.id, patch, coalesce);
@@ -167,23 +191,31 @@ export default memo(function TrackHeader({
 
   if (mode !== 'desktop') {
     const phone = mode === 'phone';
+    // A small lane with a mouse: name and M/S side by side (stacked they need
+    // ~46 px; touch lanes are made tall enough to stack 44 px buttons).
+    const inline = !phone && height < 56;
     return (
-      <div onPointerDown={() => onSelect(track.id)} className={`${rowBase} flex flex-col`} style={rowStyle}>
+      <div onPointerDown={() => onSelect(track.id)} className={`${rowBase} flex ${inline ? 'items-center pr-2' : 'flex-col'}`} style={rowStyle}>
         <button
           type="button"
           onClick={() => onOpen?.(track.id)}
           title="Track settings"
-          className={`weight-hover block w-full truncate border-0 bg-transparent px-1.5 pt-0.5 text-left text-caption leading-tight ${
-            audible ? 'text-ink' : 'text-muted'
-          }`}
+          className={`weight-hover block min-w-0 truncate border-0 bg-transparent px-1.5 text-left text-caption leading-tight ${
+            inline ? 'flex-1' : 'w-full pt-0.5'
+          } ${audible ? 'text-ink' : 'text-muted'}`}
         >
           {track.name}
         </button>
-        <MuteSolo track={track} set={set} big className={`mt-auto ${phone ? 'justify-start pl-0.5' : 'justify-start pl-1'}`} />
+        <MuteSolo track={track} set={set} size={mode} className={inline ? '' : `mt-auto justify-start ${phone ? 'pl-0.5' : 'pl-1'}`} />
         {meter}
       </div>
     );
   }
+
+  // Rows of controls the lane has room for: name/M/S/menu, then volume and
+  // pan side by side, then pan on its own row. 44 px rows on touch
+  // (ArrangeScreen makes touch lanes tall enough for two), ~26 px with a mouse.
+  const rows = coarse ? (height >= 133 ? 3 : height >= 89 ? 2 : 1) : height >= 88 ? 3 : height >= 56 ? 2 : 1;
 
   return (
     <div onPointerDown={() => onSelect(track.id)} className={`${rowBase} flex`} style={rowStyle}>
@@ -195,13 +227,15 @@ export default memo(function TrackHeader({
       >
         ⋮
       </div>
-      <div className="flex min-w-0 flex-1 flex-col justify-center gap-0.5 py-0.5 pr-2.5">
+      <div className="flex min-w-0 flex-1 flex-col justify-center gap-0.5 py-0.5 pr-2.5 coarse:gap-0 coarse:py-0">
         <div className="flex min-w-0 items-center gap-1.5">
           <InlineName
+            ref={nameRef}
             value={track.name}
             label="Track name"
+            armed={selected}
             onCommit={(name) => set({ name })}
-            className={`flex-1 text-caption ${audible ? '' : '!text-muted'}`}
+            className={`flex-1 text-caption coarse:leading-[44px] ${audible ? '' : '!text-muted'}`}
             inputClassName="min-w-0 flex-1 text-caption"
           />
           <MuteSolo track={track} set={set} />
@@ -222,6 +256,7 @@ export default memo(function TrackHeader({
               anchorRef={menuBtn}
               align="left"
               items={[
+                { label: 'Rename…', onSelect: () => nameRef.current?.edit() },
                 { label: 'Move up', disabled: index === 0, onSelect: () => onMove(track.id, index - 1) },
                 { label: 'Move down', disabled: index >= count - 1, onSelect: () => onMove(track.id, index + 1) },
                 { separator: true },
@@ -231,7 +266,7 @@ export default memo(function TrackHeader({
           </span>
         </div>
         {asking ? (
-          <div className="flex items-baseline gap-3 text-caption" onKeyDown={(e) => e.key === 'Escape' && setAsking(false)}>
+          <div className="flex items-center gap-3 text-caption" onKeyDown={(e) => e.key === 'Escape' && setAsking(false)}>
             <span className="truncate">Delete track?</span>
             <TextButton autoFocus onClick={() => onDelete(track.id)}>
               Confirm
@@ -240,12 +275,12 @@ export default memo(function TrackHeader({
               Cancel
             </TextButton>
           </div>
-        ) : height >= 88 ? (
+        ) : rows === 3 ? (
           <>
             <VolumeSlider track={track} set={set} />
             <PanSlider track={track} set={set} />
           </>
-        ) : height >= 56 ? (
+        ) : rows === 2 ? (
           <div className="flex min-w-0 items-center gap-2">
             <VolumeSlider track={track} set={set} className="flex-[3]" />
             <PanSlider track={track} set={set} className="flex-[2]" />

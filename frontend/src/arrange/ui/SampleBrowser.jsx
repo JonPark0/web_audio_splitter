@@ -79,7 +79,7 @@ const SampleItem = memo(function SampleItem({ sample, playing, coarse, onToggleP
       onDragEnd={() => {
         sampleDrag.current = null;
       }}
-      title={coarse ? 'Tap to place on a lane' : 'Drag onto a track'}
+      title={coarse ? 'Tap to place on a lane' : 'Click to preview, drag onto a track'}
       className={`flex items-center gap-2 ${coarse ? 'min-h-[56px]' : 'min-h-[40px] cursor-grab active:cursor-grabbing'}`}
     >
       <TextButton
@@ -104,7 +104,9 @@ const SampleItem = memo(function SampleItem({ sample, playing, coarse, onToggleP
           <span className="w-full truncate text-caption tabular-nums text-muted">{meta.join(' · ')}</span>
         </button>
       ) : (
-        <div className="flex min-w-0 flex-1 flex-col transition-opacity duration-140 hover:opacity-55">
+        // Mouse: a click previews (as in a DAW browser); the play button and
+        // Add keep keyboard access.
+        <div onClick={() => onTogglePlay(sample)} className="flex min-w-0 flex-1 flex-col transition-opacity duration-140 hover:opacity-55">
           <span className="truncate leading-tight">{sample.name}</span>
           <span className="truncate text-caption tabular-nums text-muted">{meta.join(' · ')}</span>
         </div>
@@ -123,8 +125,8 @@ const SampleItem = memo(function SampleItem({ sample, playing, coarse, onToggleP
 
 /**
  * Library samples to arrange: debounced search; with a mouse drag a row onto
- * a lane (or click / Add to place it at the playhead); on touch tap a row,
- * then tap a lane to place it. Preview plays through one shared element.
+ * a lane (click previews it, Add places it at the playhead); on touch tap a
+ * row, then tap a lane to place it. Preview plays through one shared element.
  */
 export default function SampleBrowser({ onAdd, onArm, onError, coarse, className = '' }) {
   const [q, setQ] = useState('');
