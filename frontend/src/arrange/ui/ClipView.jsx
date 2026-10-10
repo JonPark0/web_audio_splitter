@@ -17,9 +17,9 @@ const PENDING_STYLE = {
  *
  * Shows: name, waveform (loop repeats dimmed, reversed mirrored), fade
  * ramps, and a hatch while its server render is still on the way.
- * A swipe that starts here scrolls the timeline (touch-action pan); the
- * Timeline lifts the clip only after a long-press, and shows it `dragging`
- * from that moment.
+ * A swipe that starts here scrolls the timeline (`touchAction` pan, none
+ * while a pen is in use); the Timeline lifts the clip only after a
+ * long-press, and shows it `dragging` from that moment.
  */
 export default memo(function ClipView({
   clip,
@@ -39,6 +39,7 @@ export default memo(function ClipView({
   coarse,
   handlePx,
   engine,
+  touchAction = 'pan-x pan-y',
   onClipPointerDown,
 }) {
   const name = sample?.name || 'Missing sample';
@@ -70,7 +71,7 @@ export default memo(function ClipView({
       className={`absolute overflow-hidden bg-wash outline outline-ink ${coarse ? '' : 'cursor-grab'} ${
         selected ? 'z-10 outline-2 -outline-offset-2' : 'outline-1 -outline-offset-1'
       } ${dimmed ? 'opacity-55' : ''} ${dragging ? 'z-20 cursor-grabbing opacity-80' : ''}`}
-      style={{ left, top, width: Math.max(2, width), height, touchAction: 'pan-x pan-y' }}
+      style={{ left, top, width: Math.max(2, width), height, touchAction }}
     >
       {showLabel && (
         <div

@@ -65,7 +65,8 @@ function MarkerFlag({ marker, left, onSeek, onRename }) {
  * Bar/beat ruler. Click/tap seeks (snapped). The loop region has a handle
  * at each edge to drag (snapped); with a mouse, dragging across empty ruler
  * draws a new loop. On touch a swipe scrolls instead — no accidental loops.
- * Markers sit on top: click to jump, double-click to rename.
+ * Markers sit on top: click to jump, double-click to rename. While a pen is
+ * in use (`pen`, see Timeline) the ruler doesn't pan, so a pen draws loops.
  *
  * Drags go through the Timeline's `claim` (one drag at a time, no touch
  * scroll or Follow meanwhile) and scroll `scrollRef` at its edges.
@@ -78,6 +79,7 @@ export default memo(function Ruler({
   step,
   markers = [],
   coarse,
+  pen = false,
   scrollRef,
   headerWidth = 0,
   claim = () => () => {},
@@ -218,10 +220,11 @@ export default memo(function Ruler({
   return (
     <div
       ref={ref}
+      data-ruler=""
       onPointerDown={onPointerDown}
       title={coarse ? 'Tap to move the playhead · drag the loop handles' : 'Click to move the playhead · drag to set the loop'}
       className="relative cursor-pointer select-none border-b border-ink text-caption"
-      style={{ height, touchAction: 'pan-x' }}
+      style={{ height, touchAction: pen ? 'none' : 'pan-x' }}
     >
       {/* Loop region: an enabled loop is the wash fill under an ink top edge;
           a disabled one keeps only its hairline ends. */}

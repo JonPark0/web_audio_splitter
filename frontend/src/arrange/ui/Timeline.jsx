@@ -75,7 +75,8 @@ function edgeRoom(track, id, x0, x1, span) {
  *            clip (300 ms) to drag it, long-press an empty lane for a
  *            selection box; trim handles sit outside the selected clip;
  *            two fingers pinch-zoom. With an armed sample a tap places it.
- *   pen    - like the mouse, but holds the scroll for the whole drag.
+ *   pen    - like the mouse, but holds the scroll for the whole drag; while
+ *            a pen is in use the lanes, clips and ruler don't pan at all.
  *
  * One drag at a time, owned by the pointer that started it: other fingers
  * never move it, and pinch, touch scrolling and Follow wait until it ends.
@@ -126,8 +127,10 @@ export default function Timeline({
   const [dropHint, setDropHint] = useState(null); // {trackIndex, beat, beats}
   const [ghost, setGhost] = useState(null); // armed-sample placement preview {trackIndex, beat}
   // owner: the drag holding the timeline (blocks touch scroll and pinch,
-  // pauses Follow); pinching: two fingers down; pointer: last pointerType.
-  const gesture = useRef({ owner: null, pinching: false, pointer: 'mouse' });
+  // pauses Follow); pinching: two fingers down; pointer: last pointerType;
+  // pen: a pen is in use (mirrors `pen` below for the handlers).
+  const gesture = useRef({ owner: null, pinching: false, pointer: 'mouse', pen: false });
+  const [pen, setPen] = useState(false);
   const rulerHeight = coarse ? RULER_HEIGHT_TOUCH : RULER_HEIGHT;
 
   const { tracks, samples = {}, bpm } = project;
@@ -332,6 +335,56 @@ export default function Timeline({
       el.removeEventListener('gestureend', onGestureEnd);
     };
   }, [zoomAround]);
+
+  // Pens. Chrome (Android, Windows) sends no touch events for a pen, so the
+  // touchmove lock above can't hold one, and touch-action is fixed when a
+  // stroke starts, before any of its events reach a handler: on `pan-x
+  // pan-y` the browser took a pen drag as a pan (pointercancel). So while a
+  // pen is in use the lanes, clips and ruler are `touch-action: none` and
+  // the pen drags like a mouse. Most pens report themselves hovering
+  // (pointerover / pointermove) before they touch; one that can't hover
+  // may still pan on its first stroke, and is caught for the next ones.
+  const notePen = useCallback((e) => {
+    if (e.pointerType !== 'pen' || gesture.current.pen) return;
+    gesture.current.pen = true;
+    setPen(true);
+  }, []);
+  // A finger switches back on its pointerdown (its pointerover comes too
+  // late as well: that stroke's touch-action was set before it). The stroke
+  // itself still can't pan natively, so it pans the view by hand until a
+  // long-press drag or a pinch takes over.
+  const panByHand = useCallback((down) => {
+    const el = scrollRef.current;
+    const g = gesture.current;
+    const left = el.scrollLeft;
+    const top = el.scrollTop;
+    let panning = false;
+    let done = false;
+    followPointer(down, {
+      move: (ev) => {
+        if (done || g.owner || g.pinching) {
+          done = true;
+          return;
+        }
+        const dx = ev.clientX - down.clientX;
+        const dy = ev.clientY - down.clientY;
+        if (!panning && Math.hypot(dx, dy) <= TOUCH_SLOP_PX) return;
+        panning = true;
+        el.scrollLeft = left - dx;
+        el.scrollTop = top - dy;
+      },
+    });
+  }, []);
+  const onPointerDownCapture = (e) => {
+    const g = gesture.current;
+    g.pointer = e.pointerType;
+    notePen(e);
+    if (e.pointerType !== 'touch' || !g.pen) return;
+    g.pen = false;
+    setPen(false);
+    if (e.target.closest('[data-lanes],[data-ruler]')) panByHand(e);
+  };
+  const pan = pen ? 'none' : 'pan-x pan-y';
 
   // Lanes coordinates (the rect includes the scroll) at the current zoom.
   const pointAt = useCallback((clientX, clientY) => {
@@ -732,6 +785,7 @@ export default function Timeline({
           coarse={coarse}
           handlePx={MOUSE_HANDLE_PX}
           engine={engine}
+          touchAction={pan}
           onClipPointerDown={onClipPointerDown}
         />
       );
@@ -778,9 +832,9 @@ export default function Timeline({
     <div
       ref={scrollRef}
       data-timeline=""
-      onPointerDownCapture={(e) => {
-        gesture.current.pointer = e.pointerType;
-      }}
+      onPointerDownCapture={onPointerDownCapture}
+      onPointerOver={notePen}
+      onPointerMove={notePen}
       // No native menu on a long-press (also on a touch laptop, whose mouse
       // keeps its right-click menu).
       onContextMenu={(e) => (e.nativeEvent.pointerType || gesture.current.pointer) !== 'mouse' && e.preventDefault()}
@@ -806,6 +860,7 @@ export default function Timeline({
               step={step}
               markers={markers}
               coarse={coarse}
+              pen={pen}
               scrollRef={scrollRef}
               headerWidth={headerWidth}
               claim={claim}
@@ -856,7 +911,7 @@ export default function Timeline({
             onDragLeave={onDragLeave}
             onDrop={onDrop}
             className={`relative isolate ${armedSample ? 'cursor-copy' : ''}`}
-            style={{ width, height: lanesHeight }}
+            style={{ width, height: lanesHeight, touchAction: pan }}
           >
             {tracks.map((track, i) => (
               <div
