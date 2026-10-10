@@ -1,6 +1,7 @@
 import React from 'react';
 import { FiX } from 'react-icons/fi';
 import TextButton from '../../components/TextButton';
+import { MOD } from '../../keys';
 import { CommitField, Group } from './fields';
 import InlineName from './InlineName';
 import { formatBarBeat, parseBarBeat } from './snap';
@@ -115,7 +116,7 @@ export default function ProjectPanel({ project, variant = 'dock', onLoopChange, 
       </div>
       {showHints && (
         <p className="m-0 truncate text-caption">
-          Click a clip to edit · drag an empty lane to select · S splits · Ctrl/Cmd+C/V copy/paste · ←/→ nudge · L loop · Home · +/− zoom · Space
+          Click a clip to edit · drag an empty lane to select · S splits · {MOD}+C/V copy/paste · ←/→ nudge · L loop · Home · +/− zoom · Space
         </p>
       )}
     </div>

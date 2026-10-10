@@ -1,7 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { FiChevronDown, FiMinus, FiMoreHorizontal, FiPlay, FiPlus, FiSquare } from 'react-icons/fi';
 import TextButton from '../../components/TextButton';
+import { MOD, isComposing, parseDecimal } from '../../keys';
 import { MAX_BPM, MIN_BPM } from '../project';
+import { ResetValue } from './fields';
 import { ClipIndicator, MeterBar } from './Meters';
 import { Menu, useDismiss } from './Overlay';
 import { useClockListener } from './playheadClock';
@@ -30,7 +32,10 @@ export function PositionReadout({ clock, beatsPerBar, className = '' }) {
 
 const roundBpm = (v) => Math.round(v * 100) / 100;
 
-/** Project tempo: typed, committed on Enter/blur, reverted on Escape or bad input. */
+/**
+ * Project tempo: typed (a decimal comma works), committed on Enter/blur -
+ * or when it's removed mid-edit - and reverted on Escape or bad input.
+ */
 export function BpmInput({ bpm, onCommit, className = '', showLabel = true }) {
   const [draft, setDraft] = useState(String(bpm));
   const focused = useRef(false);
@@ -41,8 +46,8 @@ export function BpmInput({ bpm, onCommit, className = '', showLabel = true }) {
   const commit = () => {
     if (!focused.current) return;
     focused.current = false;
-    const value = Number(draft);
-    if (cancel.current || draft.trim() === '' || !Number.isFinite(value)) {
+    const value = parseDecimal(draft);
+    if (cancel.current || !Number.isFinite(value)) {
       cancel.current = false;
       setDraft(String(bpm));
       return;
@@ -51,11 +56,15 @@ export function BpmInput({ bpm, onCommit, className = '', showLabel = true }) {
     setDraft(String(next));
     if (next !== bpm) onCommit(next);
   };
+  const commitRef = useRef(commit);
+  commitRef.current = commit;
+  useEffect(() => () => commitRef.current(), []);
   return (
     <label className={`flex items-baseline gap-1 ${className}`}>
       <input
         type="text"
         inputMode="decimal"
+        enterKeyHint="done"
         value={draft}
         onFocus={(e) => {
           focused.current = true;
@@ -68,7 +77,7 @@ export function BpmInput({ bpm, onCommit, className = '', showLabel = true }) {
         onBlur={commit}
         onKeyDown={(e) => {
           e.stopPropagation();
-          if (e.key === 'Enter' || e.key === 'Escape') {
+          if ((e.key === 'Enter' && !isComposing(e)) || e.key === 'Escape') {
             cancel.current = e.key === 'Escape';
             commit();
             e.currentTarget.blur();
@@ -124,7 +133,11 @@ export function SaveIndicator({ status, error, retryAt, onRetry, compact }) {
   );
 }
 
-/** Current project name as a menu: other projects, new, rename, delete. */
+/**
+ * Current project name as a menu: new, rename, delete, then every project.
+ * The actions come first so a long list can't push them out of reach.
+ * `className` sets its width; give it a min-width so it can shrink.
+ */
 export function ProjectPicker({ projects, project, busy, onOpen, onCreate, onRename, onDelete, onShowList, className = '' }) {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState(null); // 'rename' | 'delete'
@@ -145,7 +158,7 @@ export function ProjectPicker({ projects, project, busy, onOpen, onCreate, onRen
         onBlur={() => finish(true)}
         onKeyDown={(e) => {
           e.stopPropagation();
-          if (e.key === 'Enter') finish(true);
+          if (e.key === 'Enter' && !isComposing(e)) finish(true);
           if (e.key === 'Escape') finish(false);
         }}
         className={`ainput !pb-0.5 coarse:min-h-[44px] coarse:text-p ${className}`}
@@ -174,14 +187,6 @@ export function ProjectPicker({ projects, project, busy, onOpen, onCreate, onRen
     );
   }
   const items = [
-    ...projects.map((p) => ({
-      key: p.id,
-      label: p.name,
-      checked: p.id === project?.id,
-      hint: `${p.track_count ?? 0}T · ${p.clip_count ?? 0}C · ${Math.round(p.bpm)}`,
-      onSelect: () => p.id !== project?.id && onOpen(p.id),
-    })),
-    { separator: true },
     { label: 'New project', disabled: busy, onSelect: onCreate },
     project && {
       label: 'Rename…',
@@ -191,9 +196,17 @@ export function ProjectPicker({ projects, project, busy, onOpen, onCreate, onRen
       },
     },
     project && { label: 'Delete…', disabled: busy, onSelect: () => setMode('delete') },
+    projects.length > 0 && { separator: true },
+    ...projects.map((p) => ({
+      key: p.id,
+      label: p.name,
+      checked: p.id === project?.id,
+      hint: `${p.track_count ?? 0}T · ${p.clip_count ?? 0}C · ${Math.round(p.bpm)}`,
+      onSelect: () => p.id !== project?.id && onOpen(p.id),
+    })),
   ];
   return (
-    <span ref={anchor} className={`relative flex min-w-0 ${className}`}>
+    <span ref={anchor} className={`relative flex ${className}`}>
       <button
         type="button"
         onClick={() => {
@@ -223,8 +236,8 @@ export function ExportControl({ project, exporting, progress, disabled, onExport
   useDismiss(open, ref, () => setOpen(false));
   const hasLoop = project?.loop?.end_beat > project?.loop?.start_beat;
   const effective = hasLoop ? scope : 'song';
-  const word = (on, label, onClick, title) => (
-    <TextButton current={on} aria-pressed={on} onClick={onClick} title={title} className={tap}>
+  const word = (on, label, onClick, title, disabled) => (
+    <TextButton current={on} aria-pressed={on} onClick={onClick} title={title} disabled={disabled} className={tap}>
       {label}
     </TextButton>
   );
@@ -252,8 +265,9 @@ export function ExportControl({ project, exporting, progress, disabled, onExport
           <div className="flex items-baseline gap-4">
             <span className="w-16 text-caption text-muted">Range</span>
             {word(effective === 'song', 'Song', () => setScope('song'))}
-            {word(effective === 'loop', 'Loop', () => hasLoop && setScope('loop'), hasLoop ? 'The loop region' : 'No loop region')}
+            {word(effective === 'loop', 'Loop', () => setScope('loop'), 'The loop region', !hasLoop)}
           </div>
+          {!hasLoop && <p className="m-0 -mt-1 pl-20 text-caption text-muted">Loop needs a loop region (L, or drag on the ruler).</p>}
           <div className="flex items-baseline gap-4">
             <span className="w-16 text-caption text-muted">Files</span>
             {word(!stems, 'Mix', () => setStems(false), 'One stereo WAV')}
@@ -281,30 +295,37 @@ export function ExportControl({ project, exporting, progress, disabled, onExport
   );
 }
 
-/** Master: stereo peak meter, clip light, and (when wide) the master fader. */
+/** Master volume fader; the readout resets it to 0 dB. */
+export function MasterFader({ masterGain, onMasterGain, className = '' }) {
+  return (
+    <span className={`flex items-center gap-1.5 text-caption ${className}`} title="Master volume (double-click or tap the value to reset)">
+      <input
+        type="range"
+        min={MIN_DB}
+        max="6"
+        step="0.5"
+        value={gainToDb(masterGain)}
+        onChange={(e) => onMasterGain(Math.round(dbToGain(parseFloat(e.target.value)) * 10000) / 10000)}
+        onDoubleClick={() => onMasterGain(1)}
+        aria-label="Master volume"
+        aria-valuetext={formatDb(masterGain)}
+        className="slider w-16 coarse:h-11"
+      />
+      <ResetValue onReset={() => onMasterGain(1)} label="Reset master volume to 0 dB" className="w-[52px]">
+        {formatDb(masterGain)}
+      </ResetValue>
+    </span>
+  );
+}
+
+/** Master: stereo peak meter, clip light, and (when there's room) the master fader. */
 export function MasterSection({ meterClock, masterGain, onMasterGain, showFader }) {
   const pick = (m) => m.master;
   return (
     <span className="flex shrink-0 items-center gap-2" title="Master level">
       <MeterBar clock={meterClock} pick={pick} channels={2} label="Master level" className="h-2.5 w-14" />
       <ClipIndicator clock={meterClock} pick={pick} className="w-8 text-left" />
-      {showFader && (
-        <label className="flex items-center gap-1.5 text-caption">
-          <input
-            type="range"
-            min={MIN_DB}
-            max="6"
-            step="0.5"
-            value={gainToDb(masterGain)}
-            onChange={(e) => onMasterGain(Math.round(dbToGain(parseFloat(e.target.value)) * 10000) / 10000)}
-            onDoubleClick={() => onMasterGain(1)}
-            aria-label="Master volume"
-            aria-valuetext={formatDb(masterGain)}
-            className="slider w-16 coarse:h-11"
-          />
-          <span className="w-[52px] text-right tabular-nums">{formatDb(masterGain)}</span>
-        </label>
-      )}
+      {showFader && <MasterFader masterGain={masterGain} onMasterGain={onMasterGain} />}
     </span>
   );
 }
@@ -322,7 +343,7 @@ export function MoreButton({ open, onToggle, anchorRef, label = 'More', classNam
 export function ZoomButtons({ zoom, onZoom, onFit }) {
   return (
     <span className="flex items-center gap-2">
-      <TextButton muted label="" onClick={() => onZoom(-1)} disabled={zoom <= MIN_ZOOM} aria-label="Zoom out (−)" title="Zoom out (−, Ctrl/Cmd+wheel)" className={`min-w-[20px] ${tap}`}>
+      <TextButton muted label="" onClick={() => onZoom(-1)} disabled={zoom <= MIN_ZOOM} aria-label="Zoom out (−)" title={`Zoom out (−, ${MOD}+wheel)`} className={`min-w-[20px] ${tap}`}>
         {icon(FiMinus)}
       </TextButton>
       <TextButton muted label="" onClick={() => onZoom(1)} disabled={zoom >= MAX_ZOOM} aria-label="Zoom in (+)" title="Zoom in (+)" className={`min-w-[20px] ${tap}`}>

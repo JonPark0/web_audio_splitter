@@ -8,8 +8,10 @@
  *                                 // idempotent): applies mix changes live,
  *                                 // reschedules only what an edit touched,
  *                                 // prefetches audio/renders
- *   await engine.play(fromBeat);  // first call must come from a user
- *                                 // gesture (browser autoplay policy)
+ *   await engine.play(fromBeat);  // call synchronously from the user's
+ *                                 // gesture (autoplay policy; iOS silent
+ *                                 // switch and interruptions); rejects if
+ *                                 // the system won't give us audio
  *   engine.stop();                // pause; playhead stays where it was heard
  *   engine.seek(beat);            // move playhead (keeps playing if playing)
  *   engine.isPlaying();
@@ -22,9 +24,11 @@
  *                                 // linear peaks of the latest ~20 ms; poll per frame
  *   await engine.getBuffer(sampleId);  // decoded SOURCE audio (AudioBuffer)
  *                                      // for drawing clip waveforms
- *   const off = engine.on('state', ({ playing, positionBeats, loading, pending }) => {});
+ *   const off = engine.on('state', ({ playing, positionBeats, loading, pending, interrupted }) => {});
  *                                 // pending: clip ids still waiting for their
- *                                 // exact audio (server render or source)
+ *                                 // exact audio (server render or source);
+ *                                 // interrupted: playback stopped because the
+ *                                 // system took the audio (call, Siri, lock)
  *   engine.on('error', ({ message }) => {});
  *   await engine.renderOffline(project, { fromBeat, toBeat, sampleRate,
  *                                         masterGain, soloTrackId });
@@ -75,6 +79,7 @@ import {
   secondsPerBeat,
 } from './project';
 import { renderUrl, sampleAudioUrl } from './projectsApi';
+import { preferPlayback, releasePlayback, resumeContext, watchInterruptions } from '../audioSession';
 
 const LOOKAHEAD_SEC = 0.25;
 const TICK_MS = 25;
@@ -82,6 +87,8 @@ const START_LATENCY_SEC = 0.05;
 const FADE_SEC = 0.005; // de-click ramp at voice edges
 const CLICK_SEC = 0.03;
 const METER_FFT = 1024;
+// How long play() waits for a suspended/interrupted context to resume.
+const RESUME_TIMEOUT_MS = 1500;
 // Render `bpm` param for clips that don't follow the project tempo: the
 // sample's own BPM (stretch factor 1), or any constant when it has none (the
 // server only stretches against a known source BPM). Never the project BPM,
@@ -322,6 +329,7 @@ function stereoMeter(ctx, node) {
 
 export function createEngine() {
   let ctx = null;
+  let unwatch = null;
   let master = null;
   let masterMeter = null;
   let clickBus = null;
@@ -363,10 +371,10 @@ export function createEngine() {
     return out;
   }
 
-  function emitState() {
+  function emitState(extra) {
     const pending = computePending();
     lastPendingKey = pending.join(',');
-    emit('state', { playing, positionBeats: getDisplayPositionBeats(), loading: inflight.size, pending });
+    emit('state', { playing, positionBeats: getDisplayPositionBeats(), loading: inflight.size, pending, ...extra });
   }
 
   function emitIfPendingChanged() {
@@ -384,6 +392,9 @@ export function createEngine() {
       clickBus = ctx.createGain();
       clickBus.connect(ctx.destination);
       meterScratch = new Float32Array(METER_FFT);
+      // A call, Siri or the screen lock suspends the context under us: stop
+      // where it was heard instead of showing a frozen playhead as playing.
+      unwatch = watchInterruptions(ctx, () => playing, () => stop({ interrupted: true }));
     }
     return ctx;
   }
@@ -773,7 +784,19 @@ export function createEngine() {
   async function play(fromBeat = positionBeats) {
     if (!project) return;
     ensureContext();
-    if (ctx.state !== 'running') await ctx.resume();
+    // Synchronously, still inside the tap / key press (audioSession.js): the
+    // playback session isn't muted by the silent switch, and only a gesture
+    // brings back a context iOS interrupted.
+    preferPlayback();
+    const resumed = resumeContext(ctx);
+    if (ctx.state !== 'running') {
+      // A context held by a call may never resume: don't leave Play hanging.
+      await Promise.race([resumed, new Promise((r) => setTimeout(r, RESUME_TIMEOUT_MS))]);
+      if (ctx?.state !== 'running') {
+        releasePlayback();
+        throw new Error('Audio could not start (in use by a call or another app?). Tap Play to try again.');
+      }
+    }
     const loop = loopBounds();
     // Starting past the loop end would never loop; start at the loop instead.
     const start = loop && fromBeat >= loop.end_beat ? loop.start_beat : Math.max(0, fromBeat);
@@ -783,14 +806,15 @@ export function createEngine() {
     emitState();
   }
 
-  function stop() {
+  function stop({ interrupted = false } = {}) {
     if (playing) positionBeats = getDisplayPositionBeats();
     playing = false;
     clearInterval(timer);
     timer = null;
     if (ctx) silenceAll(ctx.currentTime);
     segments = [];
-    emitState();
+    releasePlayback();
+    emitState(interrupted ? { interrupted: true } : undefined);
   }
 
   function seek(beat) {
@@ -925,7 +949,7 @@ export function createEngine() {
   return {
     setProject,
     play,
-    stop,
+    stop: () => stop(),
     seek,
     isPlaying: () => playing,
     getPositionBeats,
@@ -946,6 +970,7 @@ export function createEngine() {
     },
     dispose() {
       stop();
+      unwatch?.();
       listeners.state.clear();
       listeners.error.clear();
       loaded.clear();
