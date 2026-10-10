@@ -8,8 +8,12 @@ export function saveBlob(blob, name) {
   document.body.appendChild(a);
   a.click();
   a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 30000);
+  // Generous: iOS asks "Download?" first, and the URL must outlive that.
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
+
+// URLs being fetched, so repeated taps don't save the file twice.
+const fetching = new Set();
 
 /**
  * Click handler for a same-origin download link that must keep the
@@ -17,11 +21,17 @@ export function saveBlob(blob, name) {
  * sample name) would otherwise win over the attribute, and the BPM/key in
  * "<name>_<bpm>bpm_<key>.wav" would be lost. Fetches into a blob instead;
  * modified clicks (new tab, copy) keep the plain link.
+ *
+ * Returns a promise that settles once the file is handed over (callers
+ * show "Downloading…" meanwhile), or null when the click wasn't taken over
+ * or the same file is already on its way.
  */
 export function downloadAsNamed(e, url, name) {
-  if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+  if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return null;
   e.preventDefault();
-  fetch(url)
+  if (fetching.has(url)) return null;
+  fetching.add(url);
+  return fetch(url)
     .then((res) => {
       if (!res.ok) throw new Error(String(res.status));
       return res.blob();
@@ -35,5 +45,6 @@ export function downloadAsNamed(e, url, name) {
       document.body.appendChild(a);
       a.click();
       a.remove();
-    });
+    })
+    .finally(() => fetching.delete(url));
 }
