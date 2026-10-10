@@ -25,6 +25,7 @@ export const LANE_HEIGHTS = [40, 64, 88];
 export const DEFAULT_LANE = 64;
 export const PHONE_LANE = 56;
 export const RULER_HEIGHT = 28;
+export const RULER_HEIGHT_TOUCH = 44; // the ruler is the only way to seek by touch
 export const NEW_TRACK_ROW_HEIGHT = 44; // drop zone / "Add track" below the last track
 
 /** Track header column width per layout. */
