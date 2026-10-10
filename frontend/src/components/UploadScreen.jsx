@@ -10,6 +10,7 @@ import Hairline from './jobs/Hairline';
 import ModelSelect from './jobs/ModelSelect';
 import { formatMB } from './jobs/format';
 import { jobsChanged } from './jobs/jobsStore';
+import { DropWash, usePageFileDrop } from './jobs/PageDrop';
 import {
   ACCEPT,
   VIDEO_ACCEPTED,
@@ -19,6 +20,7 @@ import {
   removeItem,
   retryItem,
   startUploads,
+  takeDropReport,
   useUploadQueue,
 } from './jobs/uploadQueue';
 
@@ -49,8 +51,6 @@ function saveSettings(settings) {
   }
 }
 
-const isFileDrag = (e) => Array.from(e.dataTransfer?.types || []).includes('Files');
-
 // "a, b, c and 2 more"
 const someNames = (names) => names.slice(0, 3).join(', ') + (names.length > 3 ? ` and ${names.length - 3} more` : '');
 
@@ -64,7 +64,10 @@ function itemStateText(item) {
     case 'waiting':
       return 'Waiting';
     case 'uploading':
+      if (item.reconnecting) return `Reconnecting... · ${formatMB(item.loaded)} / ${formatMB(item.total)} MB`;
       return `${formatMB(item.loaded)} / ${formatMB(item.total)} MB${item.rate ? ` · ${formatMB(item.rate)} MB/s` : ''}`;
+    case 'paused':
+      return `Paused · ${formatMB(item.loaded)} / ${formatMB(item.total)} MB`;
     case 'checking':
       return 'Checking file...';
     case 'done':
@@ -79,9 +82,10 @@ function itemStateText(item) {
 /**
  * "New split": source (files or a YouTube link), separation model,
  * restoration, and the CTA. Files upload one after another with byte
- * progress and can be cancelled; every file becomes its own job in the jobs
- * list next to it. Settings are remembered between visits. Files can be
- * dropped anywhere on the page. On phones the CTA is a fixed bottom bar;
+ * progress, resume after a dropped connection and can be cancelled; every
+ * file becomes its own job in the jobs list next to it. Settings are
+ * remembered between visits. Files can be dropped anywhere on the page (on
+ * a job page too: see jobs/PageDrop). On phones the CTA is a fixed bottom bar;
  * `onBarHeight(px)` reports its height (0 when it isn't fixed) so the page
  * can pad for it.
  */
@@ -100,7 +104,6 @@ export default function UploadScreen({ onBarHeight }) {
   const [ytBusy, setYtBusy] = useState(''); // progress words while fetching a link
   const [error, setError] = useState('');
   const [message, setMessage] = useState(null); // { text, href }
-  const [dragging, setDragging] = useState(false);
 
   const items = useUploadQueue();
   const fileId = useId();
@@ -118,8 +121,8 @@ export default function UploadScreen({ onBarHeight }) {
   const ready = items.filter((i) => i.state === 'ready');
   const locked = uploading || !!ytBusy;
 
-  const takeFiles = (fileList) => {
-    const { added, rejected, tooBig, maxMB } = addFiles(fileList);
+  // What became of added files (see addFiles).
+  const reportAdded = ({ added, rejected, tooBig, maxMB }) => {
     if (added) {
       setInputMode('file');
       setMessage(null);
@@ -141,68 +144,16 @@ export default function UploadScreen({ onBarHeight }) {
     if (skipped.length) setError(skipped.join('. '));
     else if (added) setError('');
   };
-  const takeFilesRef = useRef(takeFiles);
-  takeFilesRef.current = takeFiles;
+  const takeFiles = (fileList) => reportAdded(addFiles(fileList));
 
-  // Page-wide drop target. An enter/leave counter keeps the wash steady
-  // while the drag crosses child elements; anything that ends a drag without
-  // balancing it (drop, dragend, leaving the window, switching apps) resets.
+  // Page-wide drop target.
+  const dragging = usePageFileDrop(takeFiles);
+
+  // Files dropped on a job page brought us here: say what became of them.
   useEffect(() => {
-    let depth = 0;
-    let leaveTimer = 0;
-    const reset = () => {
-      clearTimeout(leaveTimer);
-      depth = 0;
-      setDragging(false);
-    };
-    const onEnter = (e) => {
-      if (!isFileDrag(e)) return;
-      clearTimeout(leaveTimer);
-      depth += 1;
-      setDragging(true);
-    };
-    const onLeave = (e) => {
-      if (!isFileDrag(e)) return;
-      depth = Math.max(0, depth - 1);
-      if (!depth) setDragging(false);
-      // No element to go to: the drag left the window, whatever the counter
-      // says (an element removed mid-drag never sends its dragleave). Safari
-      // leaves relatedTarget null on every dragleave, so wait for the
-      // dragover that follows when the drag is still on the page.
-      else if (e.relatedTarget === null) {
-        clearTimeout(leaveTimer);
-        leaveTimer = setTimeout(reset, 300);
-      }
-    };
-    const onOver = (e) => {
-      if (!isFileDrag(e)) return;
-      clearTimeout(leaveTimer);
-      if (e.defaultPrevented) return;
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'copy';
-    };
-    const onDrop = (e) => {
-      if (!isFileDrag(e) || e.defaultPrevented) return;
-      e.preventDefault();
-      reset();
-      takeFilesRef.current(e.dataTransfer.files);
-    };
-    window.addEventListener('dragenter', onEnter);
-    window.addEventListener('dragleave', onLeave);
-    window.addEventListener('dragover', onOver);
-    window.addEventListener('drop', onDrop);
-    window.addEventListener('dragend', reset);
-    window.addEventListener('blur', reset);
-    return () => {
-      clearTimeout(leaveTimer);
-      window.removeEventListener('dragenter', onEnter);
-      window.removeEventListener('dragleave', onLeave);
-      window.removeEventListener('dragover', onOver);
-      window.removeEventListener('drop', onDrop);
-      window.removeEventListener('dragend', reset);
-      window.removeEventListener('blur', reset);
-    };
-  }, []);
+    const report = takeDropReport();
+    if (report) reportAdded(report);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // On phones the status sits in the bottom bar; make sure an error there
   // is actually seen (and read out).
@@ -296,9 +247,9 @@ export default function UploadScreen({ onBarHeight }) {
   const batchTotal = active ? items.filter((i) => i.batch === active.batch).length : 0;
   const batchIndex = active ? items.filter((i) => i.batch === active.batch && (i.state === 'done' || i.state === 'error')).length + 1 : 0;
   const progressValue = active ? (active.total ? Math.min(1, active.loaded / active.total) : 'indeterminate') : ytBusy ? 'indeterminate' : null;
-  // Nothing left to stop while the last file is being checked (it is on
-  // the server already and becomes a job either way).
-  const canCancel = uploading && !(active?.state === 'checking' && !items.some((i) => i.state === 'waiting'));
+  // Nothing left to stop once the last file is committed (it is on the
+  // server already and becomes a job either way).
+  const canCancel = uploading && !(active?.committed && !items.some((i) => i.state === 'waiting'));
 
   // Numbers and links before names, so the phone bar's two-line clamp only
   // ever cuts a long file or video title (the explanation after a title
@@ -418,11 +369,11 @@ export default function UploadScreen({ onBarHeight }) {
                   <li key={item.key} className="flex min-h-7 flex-wrap items-center gap-x-3">
                     <span className="min-w-0 flex-1 truncate">{item.file.name}</span>
                     {item.state !== 'error' && <span className="shrink-0 tabular-nums text-muted">{itemStateText(item)}</span>}
-                    {item.state === 'error' && item.retryable && (
+                    {((item.state === 'error' && item.retryable) || item.state === 'paused') && (
                       <TextButton
                         className="shrink-0"
                         label="Retry"
-                        aria-label={`Retry ${item.file.name}`}
+                        aria-label={`Retry ${item.file.name}${item.state === 'paused' ? ' now' : ''}`}
                         onClick={() => retryItem(item.key)}
                       >
                         Retry
@@ -446,6 +397,12 @@ export default function UploadScreen({ onBarHeight }) {
                       <span className="basis-full pb-1">
                         <span className="text-muted">Failed — </span>
                         {item.error}
+                      </span>
+                    )}
+                    {item.state === 'paused' && (
+                      <span className="basis-full pb-1">
+                        <span className="text-muted">Upload paused — </span>
+                        {item.error} It resumes where it stopped, by itself or on Retry.
                       </span>
                     )}
                   </li>
@@ -550,15 +507,7 @@ export default function UploadScreen({ onBarHeight }) {
         </div>
       </div>
 
-      {dragging && (
-        <div
-          aria-hidden="true"
-          className="pointer-events-none fixed inset-0 z-40 flex flex-col items-center justify-center gap-1 bg-wash/95"
-        >
-          <p className="m-0 text-h3">Drop to add audio files</p>
-          <p className="m-0 text-caption text-muted">Each file becomes its own job.</p>
-        </div>
-      )}
+      {dragging && <DropWash />}
     </form>
   );
 }

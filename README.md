@@ -26,7 +26,7 @@ A web application to separate audio files into individual tracks (Vocals, Drums,
 - **Arrangement View:** Ableton-style tracks on a bar/beat timeline — drag samples onto tracks, move/duplicate clips with snapping, trim either edge, **clip loop** (repeat the trimmed region to any length), fades, reverse, pitch (±24 semitones + cents), copy/paste, split at playhead, rubber-band selection, overlapping clips truncated like Ableton, track reorder, markers, time signature, master gain and peak meters, metronome, undo/redo, and **Export WAV** (whole song, loop region, or one WAV per track). Projects autosave to PostgreSQL; a save from another tab is detected (no silent overwrite), failed saves retry, and unsaved edits survive closing the tab.
 - **BPM Sync:** Warped clips follow the project tempo. Changing the BPM time-stretches them server-side (Rubber Band, pitch preserved) and caches the result; until a render arrives the clip plays sped up/down so the change is heard immediately.
 - **Phone, tablet and desktop:** Every screen works on a phone — compact rows, a fixed bottom transport/CTA bar, bottom sheets, ≥44 px touch targets, pinch-zoom, and long-press to drag clips (a swipe scrolls). Layout follows the device, not just the width: a landscape phone keeps the phone layout, an iPad in landscape gets the tablet layout, and any touch screen (touch laptops, iPads with a trackpad) gets finger-sized targets. Playback is heard with the iPhone's silent switch on and pauses cleanly after a call or Siri; content clears the notch in landscape; Safari trackpad pinch zooms waveforms; keyboard shortcuts work with a Hangul layout active.
-- **Recoverable uploads:** an upload cut off by a locked screen or a dropped connection can be retried in place, the screen is kept awake while uploading, and files over the server's limit (`GET /limits`) are refused before they're sent.
+- **Resumable uploads:** files go up in chunks, so an upload cut off by a locked screen or a dropped connection resumes where it stopped (by itself, or with Retry), the screen is kept awake while uploading, and files over the server's limit (`GET /limits`) are refused before they're sent.
 - **GPU Support:** Optional NVIDIA GPU acceleration via Docker.
 
 ## Quick Start
@@ -78,7 +78,7 @@ Once the build is complete:
 2. **Result:** Space plays/pauses. Adjust each stem's fader, mute/solo, switch Original/Recovered per stem or for all, open a stem's spectrogram, and download stems or the whole set as a zip.
 3. **Extract samples:** Click **Extract** on a stem and drag across its waveform (on a phone: Set start / Set end at the playhead). Refine with the start/end fields, ←/→ (Shift = 10 ms, Alt = 1 beat) and Snap; **Loop** the selection to check it. **Save** keeps the stem's current Original/Recovered choice; **Save mix** sums the stems you hear at their current levels. Zoom with −/+/Fit, Ctrl/⌘+wheel, Z (to selection) or pinch.
 4. **Library:** Browse with ↑/↓ (auditions with Auto on), Space, L (loop); edit name/tags/BPM/key in the inspector; check rows for bulk actions; **Sync** previews at the project tempo; **Add to Arrange** drops a sample into the last project.
-5. **Arrange:** Create a project, set its BPM and drag samples from the browser onto tracks (on a phone: tap a sample, then a lane). Clips with a known BPM are warped to the project tempo; turn on **Loop** in the clip inspector and drag the right edge to repeat a region. Export the song, the loop region or stems from the toolbar.
+5. **Arrange:** Create a project, set its BPM and drag samples from the browser onto tracks (on a phone: tap a sample, then a lane). Clips with a known BPM are warped to the project tempo; turn on **Loop** in the clip inspector and drag the right edge to repeat a region. Export the song, the loop region or stems from the toolbar. From the keyboard, Tab reaches a clip, ⌥/Alt+←/→ walks the clips on its track, ⌥/Alt+↑/↓ jumps to the nearest clip on the track above/below, arrows nudge the selection and Enter opens the clip inspector.
 
 ## Separation Models
 
@@ -278,6 +278,11 @@ npm run dev
 
 ### API Endpoints
 - `POST /upload` - Upload an audio/video file (`file`, `model`, `recover`, `recovery_model`) → `{task_id}`; `400` not audio / too long, `413` too large
+- `POST /uploads` - Start a resumable (chunked) upload (form: `filename`, `size`, `model`, `recover`, `recovery_model`) → `{upload_id, received, size, chunk_size}`; `413` too large
+- `PUT /uploads/{id}` - Append a chunk (multipart: `offset`, `chunk`) → `{received}`; `409` + `{received}` when `offset` isn't where the upload stands
+- `GET /uploads/{id}` - Where an upload stands → `{received, size, task_id}`; `DELETE /uploads/{id}` drops it (sessions idle for a day are purged)
+- `POST /uploads/{id}/complete` - The same checks as `POST /upload`, then the job → `{task_id}` (repeatable: the same job again)
+- `GET /limits` - Upload limits `{max_upload_mb, max_duration_seconds}`
 - `POST /youtube/info` - Validate a YouTube URL and return metadata (playlists and live streams are refused)
 - `POST /youtube/download` - Start a background YouTube download (`url`, `model`, `recover`, `recovery_model`, `auto_split`) → `{task_id}`; `/status` reports `download_percent`
 - `POST /youtube/confirm/{task_id}` - Confirm the downloaded audio and start processing
@@ -302,7 +307,7 @@ npm run dev
 - `GET /samples/tags` - Tags with usage counts
 - `GET /samples/{id}` / `PATCH /samples/{id}` / `DELETE /samples/{id}` - Read, edit (`name`, `tags`, `bpm`, `key`; `null` reverts bpm/key to the detected value), delete
 - `POST /samples/{id}/analyze` - Re-run BPM/key detection
-- `GET /samples/{id}/audio` - Sample WAV
+- `GET /samples/{id}/audio?download=` - Sample WAV; with `download=<name>` sent as an attachment under that name
 - `GET /samples/{id}/render?bpm=&semitones=&cents=` - Sample time-stretched to `bpm` / pitch-shifted (rendered once, cached); `DELETE /samples/renders/cache` clears the cache
 - `GET /projects` / `POST /projects` - List / create arrangement projects
 - `GET /projects/{id}` / `PUT /projects/{id}` / `DELETE /projects/{id}` - Read (samples embedded), save the whole document (tracks, clips, markers; send `base_version` to get `409` + the current document if another tab saved first), delete

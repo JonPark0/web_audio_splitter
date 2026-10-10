@@ -1,5 +1,15 @@
 import { useEffect, useState } from 'react';
-import { errorDetail, getLimits, isCanceled, uploadFile } from '../../api';
+import {
+  completeUpload,
+  createUpload,
+  discardUpload,
+  errorDetail,
+  getLimits,
+  getUpload,
+  isCanceled,
+  uploadChunk,
+  uploadFile,
+} from '../../api';
 import { jobsChanged } from './jobsStore';
 
 /**
@@ -8,11 +18,21 @@ import { jobsChanged } from './jobsStore';
  * you open a job or switch to the Library meanwhile; leaving the page while
  * one runs asks first.
  *
- * Item: { key, file, state, loaded, total, rate, error, retryable, taskId, batch, settings }
- * state: ready (picked) → waiting → uploading → checking (server probes the
- *        file) → done | error; Cancel upload puts them back to ready. Failed
- *        rows stay until removed or retried (a phone that locked mid-upload
- *        shouldn't lose the file from the list).
+ * Files go up in chunks (api.js createUpload), so a dropped connection costs
+ * the chunk in flight, not the file: a failed chunk is resent after 1, 3 and
+ * 10 s from wherever the server says it got to. After that the row is
+ * "paused" and carries on by itself when the page is shown again (a phone
+ * unlocked, the app switched back), when the network returns, every 30 s,
+ * or on Retry. Servers without chunked uploads get the file in one request.
+ *
+ * Item: { key, file, state, loaded, total, rate, error, retryable, taskId,
+ *         batch, settings, uploadId, chunkSize, committed, reconnecting }
+ * state: ready (picked) → waiting → uploading (⇄ paused) → checking (server
+ *        probes the file) → done | error; Cancel upload puts them back to
+ *        ready. `committed`: the server has the whole file and makes the job
+ *        whatever the browser does, so it can't be cancelled any more.
+ *        Failed rows stay until removed or retried (a phone that locked
+ *        mid-upload shouldn't lose the file from the list).
  */
 
 // Extensions the server's ffprobe check accepts as audio. Browsers leave
@@ -38,12 +58,21 @@ export function classifyFile(file) {
   return null;
 }
 
+// Waits before resending after a network error, 5xx, 408 or 429; then paused.
+const RETRY_DELAYS = [1000, 3000, 10000];
+const PAUSED_RETRY_MS = 30000;
+// A chunk that stops moving for this long is on a dead connection (one left
+// behind by a phone changing networks can hang for minutes): give it up.
+const STALL_MS = 30000;
+const CHUNK_SIZE = 8 * 1024 * 1024; // until the server says otherwise
+
 let items = [];
 let current = null; // { key, ctrl }
 let batchSeq = 0;
 let activeBatch = null; // { id, settings } while a batch runs
 let keySeq = 0;
 let limits = null; // { max_upload_mb, ... } once known; null: no check here
+let chunked = true; // false once the server turned out to have no /uploads
 const listeners = new Set();
 
 function set(next) {
@@ -90,24 +119,53 @@ function releaseScreen() {
   wakeLock = null;
   lock?.release().catch(() => {});
 }
+
+// Ends the running upload's wait between attempts early: Retry, the page
+// shown again, the network back.
+let wake = null;
+function resumeNow() {
+  wake?.();
+}
 const onVisibility = () => {
-  if (document.visibilityState === 'visible') holdScreen();
+  if (document.visibilityState !== 'visible') return;
+  holdScreen();
+  resumeNow();
 };
+
+/** Resolves after `ms` or on resumeNow(); rejects once `signal` aborts. */
+function pause(ms, signal) {
+  return new Promise((resolve, reject) => {
+    const end = () => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', end);
+      if (wake === end) wake = null;
+      if (signal.aborted) reject(new Error('Cancelled'));
+      else resolve();
+    };
+    const timer = setTimeout(end, ms);
+    signal.addEventListener('abort', end);
+    wake = end;
+  });
+}
+
+function loadLimits() {
+  return getLimits().then((l) => {
+    limits = l;
+  });
+}
 
 export function useUploadQueue() {
   const [state, setState] = useState(items);
   useEffect(() => {
     listeners.add(setState);
     setState(items);
-    getLimits().then((l) => {
-      limits = l;
-    });
+    loadLimits();
     return () => listeners.delete(setState);
   }, []);
   return state;
 }
 
-export const isActive = (i) => i.state === 'uploading' || i.state === 'checking';
+export const isActive = (i) => i.state === 'uploading' || i.state === 'paused' || i.state === 'checking';
 
 /**
  * Add picked/dropped files. Returns { added, rejected: [names],
@@ -143,6 +201,10 @@ export function addFiles(fileList) {
       taskId: null,
       batch: activeBatch?.id ?? null,
       settings: activeBatch?.settings ?? null,
+      uploadId: null,
+      chunkSize: 0,
+      committed: false,
+      reconnecting: false,
     }));
     set([...keep, ...fresh]);
     if (activeBatch) pump();
@@ -150,9 +212,32 @@ export function addFiles(fileList) {
   return { added: accepted.length, rejected, tooBig, maxMB };
 }
 
+// Files dropped on a job page: added there, then reported by the Split
+// home that opens for them (UploadScreen takes the report when it mounts).
+let dropReport = null;
+
+/**
+ * addFiles() once the server's size limit is known (a job page opened from
+ * a link hasn't asked yet). Resolves to the same report.
+ */
+export function addDroppedFiles(fileList) {
+  const files = Array.from(fileList || []);
+  return loadLimits().then(() => {
+    dropReport = addFiles(files);
+    return dropReport;
+  });
+}
+
+export function takeDropReport() {
+  const report = dropReport;
+  dropReport = null;
+  return report;
+}
+
 export function removeItem(key) {
   const item = items.find((i) => i.key === key);
   if (!item || isActive(item)) return;
+  if (item.uploadId) discardUpload(item.uploadId).catch(() => {});
   set(items.filter((i) => i.key !== key));
 }
 
@@ -163,6 +248,7 @@ export function clearFinished() {
 function beginBatch(settings) {
   activeBatch = { id: ++batchSeq, settings };
   window.addEventListener('beforeunload', warnOnLeave);
+  window.addEventListener('online', resumeNow);
   document.addEventListener('visibilitychange', onVisibility);
   holdScreen();
 }
@@ -180,32 +266,38 @@ export function startUploads(settings) {
 }
 
 /**
- * Upload a failed file again with the settings it was sent with: it joins
- * the running batch, or starts one of its own.
+ * A paused upload: try now. A failed file: upload it again with the
+ * settings it was sent with (from where the server got to, when it kept the
+ * bytes); it joins the running batch, or starts one of its own.
  */
 export function retryItem(key) {
   const item = items.find((i) => i.key === key);
+  if (item?.state === 'paused' && current?.key === key) {
+    resumeNow();
+    return;
+  }
   if (!item || item.state !== 'error') return;
   if (!activeBatch) beginBatch(item.settings);
-  update(key, { state: 'waiting', loaded: 0, rate: 0, error: '', batch: activeBatch.id });
+  update(key, { state: 'waiting', loaded: item.uploadId ? item.loaded : 0, rate: 0, error: '', batch: activeBatch.id });
   pump();
 }
 
 /**
- * Stop the running upload; it and the waiting ones go back to "ready". A file
- * already being checked is on the server, which queues its job whatever the
- * browser does — it finishes instead of coming back as "ready" (a second
- * Split would queue it twice).
+ * Stop the running upload (the server drops what it has of it); it and the
+ * waiting ones go back to "ready". A committed file is on the server, which
+ * queues its job whatever the browser does — it finishes instead of coming
+ * back as "ready" (a second Split would queue it twice).
  */
 export function cancelUploads() {
   set(items.map((i) => (i.state === 'waiting' ? { ...i, state: 'ready', batch: null } : i)));
   const running = current && items.find((i) => i.key === current.key);
-  if (running?.state !== 'checking') current?.ctrl.abort();
+  if (!running?.committed) current?.ctrl.abort();
 }
 
 function finishBatch() {
   activeBatch = null;
   window.removeEventListener('beforeunload', warnOnLeave);
+  window.removeEventListener('online', resumeNow);
   document.removeEventListener('visibilitychange', onVisibility);
   releaseScreen();
 }
@@ -220,46 +312,201 @@ function pump() {
   run(next);
 }
 
+const transient = (status) => !status || status >= 500 || status === 408 || status === 429;
+
+/** Bytes per second, smoothed. reset() after a jump or a wait: neither is speed. */
+function speedMeter() {
+  let t = performance.now();
+  let at = 0;
+  let rate = 0;
+  return {
+    reset(position) {
+      t = performance.now();
+      at = position;
+      rate = 0;
+    },
+    sample(position) {
+      const now = performance.now();
+      const dt = (now - t) / 1000;
+      if (dt >= 0.25) {
+        const inst = (position - at) / dt;
+        rate = rate ? rate * 0.6 + inst * 0.4 : inst;
+        t = now;
+        at = position;
+      }
+      return rate;
+    },
+  };
+}
+
 async function run(item) {
   const ctrl = new AbortController();
   current = { key: item.key, ctrl };
-  update(item.key, { state: 'uploading', loaded: 0, total: item.file.size, rate: 0, error: '' });
-  const meter = { t: performance.now(), loaded: 0, rate: 0 };
+  update(item.key, { state: 'uploading', total: item.file.size, rate: 0, error: '', committed: false, reconnecting: false });
   try {
-    const res = await uploadFile({
-      file: item.file,
-      model: item.settings.model,
-      recover: item.settings.recover,
-      recoveryModel: item.settings.recoveryModel,
-      signal: ctrl.signal,
-      onProgress: ({ loaded, total }) => {
-        const size = total || item.file.size;
-        const t = performance.now();
-        const dt = (t - meter.t) / 1000;
-        if (dt >= 0.25) {
-          const inst = (loaded - meter.loaded) / dt;
-          meter.rate = meter.rate ? meter.rate * 0.6 + inst * 0.4 : inst;
-          meter.t = t;
-          meter.loaded = loaded;
-        }
-        update(item.key, { loaded, total: size, rate: meter.rate, state: loaded >= size ? 'checking' : 'uploading' });
-      },
-    });
-    update(item.key, { state: 'done', taskId: res.data.task_id, loaded: item.file.size });
+    let taskId = chunked ? await sendInChunks(item, ctrl.signal) : null;
+    if (taskId === null) taskId = await sendWhole(item, ctrl.signal);
+    update(item.key, { state: 'done', taskId, loaded: item.file.size, rate: 0, uploadId: null, reconnecting: false });
     jobsChanged();
   } catch (e) {
     const status = e.response?.status;
-    if (isCanceled(e)) update(item.key, { state: 'ready', loaded: 0, rate: 0, batch: null });
-    else
+    const uploadId = items.find((i) => i.key === item.key)?.uploadId;
+    if (ctrl.signal.aborted || isCanceled(e)) {
+      if (uploadId) discardUpload(uploadId).catch(() => {});
+      update(item.key, { state: 'ready', loaded: 0, rate: 0, batch: null, uploadId: null, committed: false, reconnecting: false });
+    } else {
+      // no response: the connection dropped (screen locked, app switched,
+      // network gone) — worth another go, unlike "not audio" / "too large"
+      const retryable = transient(status);
+      if (uploadId && !retryable) discardUpload(uploadId).catch(() => {});
       update(item.key, {
         state: 'error',
-        // no response: the connection dropped (screen locked, app switched,
-        // network gone) — worth another go, unlike "not audio" / "too large"
         error: status ? errorDetail(e, 'Upload failed.') : 'The upload was interrupted.',
-        retryable: !status || status >= 500 || status === 408 || status === 429,
+        retryable,
+        rate: 0,
+        committed: false,
+        reconnecting: false,
+        ...(retryable ? null : { uploadId: null }),
       });
+    }
   } finally {
     current = null;
     pump();
   }
+}
+
+/**
+ * The file in chunks → its task id, or null when the server has no chunked
+ * uploads (older backend). Transient failures are waited out (see the top);
+ * anything else throws.
+ */
+async function sendInChunks(item, signal) {
+  const { file, settings } = item;
+  let uploadId = item.uploadId;
+  let chunkSize = item.chunkSize || CHUNK_SIZE;
+  let offset = 0;
+  let synced = !uploadId; // a kept upload (Retry) asks the server first
+  let committed = false;
+  let failures = 0;
+  let restarted = false;
+  const meter = speedMeter();
+
+  for (;;) {
+    try {
+      if (!uploadId) {
+        const res = await createUpload({ file, ...settings, signal });
+        uploadId = res.data.upload_id;
+        chunkSize = res.data.chunk_size || chunkSize;
+        offset = res.data.received || 0;
+        synced = true;
+        update(item.key, { uploadId, chunkSize });
+      } else if (!synced) {
+        const res = await getUpload(uploadId, { signal });
+        if (res.data.task_id) return res.data.task_id; // done; the answer to complete got lost
+        offset = res.data.received;
+        synced = true;
+        meter.reset(offset);
+        update(item.key, { loaded: offset });
+      }
+
+      if (offset < file.size) {
+        const start = offset;
+        const chunk = file.slice(start, Math.min(file.size, start + chunkSize));
+        const res = await sendChunk(uploadId, start, chunk, signal, (sent) =>
+          update(item.key, { loaded: start + sent, rate: meter.sample(start + sent), reconnecting: false })
+        );
+        offset = res.data.received;
+        failures = 0;
+      } else {
+        committed = true;
+        update(item.key, { state: 'checking', committed, loaded: file.size, rate: 0 });
+        const res = await completeUpload(uploadId, { signal });
+        return res.data.task_id;
+      }
+    } catch (e) {
+      if (signal.aborted) throw e;
+      const status = e.response?.status;
+      if (!uploadId && (status === 404 || status === 405)) {
+        chunked = false;
+        return null;
+      }
+      if (status === 409 && Number.isFinite(e.response.data?.received)) {
+        // Out of step (a resent chunk that had arrived after all): carry on
+        // from the server's count.
+        offset = e.response.data.received;
+        meter.reset(offset);
+        if (committed && offset < file.size) {
+          committed = false;
+          update(item.key, { state: 'uploading', committed });
+        }
+        continue;
+      }
+      if (status === 404 && uploadId && !restarted) {
+        // The server no longer has it (a day old, or deleted): start over.
+        restarted = true;
+        uploadId = null;
+        offset = 0;
+        committed = false;
+        meter.reset(0);
+        update(item.key, { uploadId: null, state: 'uploading', committed, loaded: 0 });
+        continue;
+      }
+      if (!transient(status)) throw e;
+
+      synced = false; // ask where it got to before resending
+      if (failures < RETRY_DELAYS.length && navigator.onLine !== false) {
+        update(item.key, { reconnecting: true, rate: 0 });
+        await pause(RETRY_DELAYS[failures], signal);
+        failures += 1;
+      } else {
+        update(item.key, {
+          state: 'paused',
+          error: status ? errorDetail(e, 'The server didn’t answer.') : 'The connection dropped.',
+          rate: 0,
+          reconnecting: false,
+        });
+        await pause(PAUSED_RETRY_MS, signal);
+        failures = 0; // then the quick retries again
+        update(item.key, { state: committed ? 'checking' : 'uploading', error: '', reconnecting: true });
+      }
+    }
+  }
+}
+
+// One chunk; `onSent(bytes)` reports its progress. A chunk that stops
+// moving for STALL_MS is abandoned (as a network error) instead of hanging.
+function sendChunk(uploadId, offset, blob, signal, onSent) {
+  const req = new AbortController();
+  const abort = () => req.abort();
+  let timer = setTimeout(abort, STALL_MS);
+  signal.addEventListener('abort', abort);
+  return uploadChunk(uploadId, offset, blob, {
+    signal: req.signal,
+    onProgress: (loaded) => {
+      clearTimeout(timer);
+      timer = setTimeout(abort, STALL_MS);
+      onSent(Math.min(loaded, blob.size)); // the form's own bytes aren't the file's
+    },
+  }).finally(() => {
+    clearTimeout(timer);
+    signal.removeEventListener('abort', abort);
+  });
+}
+
+// The whole file in one request (POST /upload), for servers without chunks.
+async function sendWhole(item, signal) {
+  const meter = speedMeter();
+  const res = await uploadFile({
+    file: item.file,
+    model: item.settings.model,
+    recover: item.settings.recover,
+    recoveryModel: item.settings.recoveryModel,
+    signal,
+    onProgress: ({ loaded, total }) => {
+      const size = total || item.file.size;
+      const sent = loaded >= size;
+      update(item.key, { loaded, total: size, rate: meter.sample(loaded), state: sent ? 'checking' : 'uploading', committed: sent });
+    },
+  });
+  return res.data.task_id;
 }

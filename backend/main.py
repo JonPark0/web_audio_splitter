@@ -22,6 +22,7 @@ import jobs
 import peaks
 import projects
 import samples
+import uploads
 from restore import restore_stems, RestoreError, SUPPORTED_MODELS, DEFAULT_MODEL
 from separate import (
     separate_audio, SeparationError, DERIVED_STEMS, DEMUCS_MODELS, BS_ROFORMER_MODEL, describe_failure,
@@ -110,6 +111,7 @@ app.add_middleware(
 
 app.include_router(samples.router)
 app.include_router(projects.router)
+app.include_router(uploads.router)
 
 MAX_DURATION_SECONDS = 1800  # 30 minutes
 
@@ -362,6 +364,16 @@ def upload_audio(
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
+    _start_upload_task(task_id, file_path, file.filename, model, recover, recovery_model)
+    return {"task_id": task_id}
+
+
+def _start_upload_task(
+    task_id: str, file_path: Path, source_name: str, model: str, recover: bool, recovery_model: str,
+) -> None:
+    """Check an uploaded file (<task_id><ext> in UPLOAD_DIR) and queue its
+    job; shared by POST /upload and the resumable /uploads/{id}/complete.
+    A refused file is deleted and the HTTPException raised."""
     # Reject non-audio and over-long files now, instead of a job that fails
     # later with a generic "Separation failed".
     try:
@@ -384,14 +396,16 @@ def upload_audio(
         model=model,
         recover=recover,
         recovery_model=recovery_model,
-        source_name=file.filename,
+        source_name=source_name,
         file_path=str(file_path),
         duration=duration,
         duration_formatted=format_duration(int(duration)),
     )
     enqueue(task_id, file_path, model, recover, recovery_model)
 
-    return {"task_id": task_id}
+
+# Chunked uploads (uploads.py) end in the same checks and job.
+uploads.configure(UPLOAD_DIR, MAX_UPLOAD_MB, validate_settings, _start_upload_task)
 
 
 @app.get("/limits")
