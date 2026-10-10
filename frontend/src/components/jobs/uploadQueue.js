@@ -212,6 +212,28 @@ export function addFiles(fileList) {
   return { added: accepted.length, rejected, tooBig, maxMB };
 }
 
+// Files dropped on a job page: added there, then reported by the Split
+// home that opens for them (UploadScreen takes the report when it mounts).
+let dropReport = null;
+
+/**
+ * addFiles() once the server's size limit is known (a job page opened from
+ * a link hasn't asked yet). Resolves to the same report.
+ */
+export function addDroppedFiles(fileList) {
+  const files = Array.from(fileList || []);
+  return loadLimits().then(() => {
+    dropReport = addFiles(files);
+    return dropReport;
+  });
+}
+
+export function takeDropReport() {
+  const report = dropReport;
+  dropReport = null;
+  return report;
+}
+
 export function removeItem(key) {
   const item = items.find((i) => i.key === key);
   if (!item || isActive(item)) return;

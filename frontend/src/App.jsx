@@ -5,6 +5,7 @@ import ErrorBoundary from './components/shell/ErrorBoundary';
 import useRouteFocus from './components/shell/useRouteFocus';
 import SplitHome from './components/jobs/SplitHome';
 import JobView from './components/jobs/JobView';
+import { DropToNewSplit } from './components/jobs/PageDrop';
 
 // Library and Arrange pull in their own heavy code (audition, the
 // arrangement engine) that the Split home never needs: separate chunks.
@@ -18,7 +19,15 @@ function Screen({ route }) {
   if (route.section === 'library') return <LibraryScreen />;
   if (route.section === 'arrange') return <ArrangeScreen />;
   const [kind, id] = route.segments;
-  if (kind === 'job' && id) return <JobView key={id} taskId={id} />;
+  if (kind === 'job' && id) {
+    // Files dropped on a job go to the Split home's queue.
+    return (
+      <>
+        <JobView key={id} taskId={id} />
+        <DropToNewSplit />
+      </>
+    );
+  }
   return <SplitHome />;
 }
 
@@ -45,7 +54,8 @@ export default function App() {
 
   // A file dropped anywhere nothing handles it must never make the browser
   // open it in place of the app (that loses the page). Screens that accept
-  // drops handle — and preventDefault — the event first.
+  // drops handle — and preventDefault — the event first (Split listens on
+  // document, which the event reaches before window; Library overrides it).
   useEffect(() => {
     const onDragOver = (e) => {
       if (!isFileDrag(e) || e.defaultPrevented) return;
