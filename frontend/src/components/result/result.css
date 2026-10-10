@@ -74,6 +74,20 @@
   padding-bottom: env(safe-area-inset-bottom);
 }
 
+/* Docked extract panel: at most half the screen (its touch lines wrap to
+   five or six 44 px rows on a tablet), less on a short window; the rest
+   scrolls inside it. vh first for browsers without dvh. */
+.rs-dock {
+  max-height: 50vh;
+  max-height: 50dvh;
+}
+@media (max-height: 600px) {
+  .rs-dock {
+    max-height: 40vh;
+    max-height: 40dvh;
+  }
+}
+
 /* Spectrogram strip: ffmpeg's colour map on black → ink on paper. */
 .rs-spec {
   filter: grayscale(1) invert(1);

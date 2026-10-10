@@ -1,6 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { FiMinus, FiPause, FiPlay, FiPlus } from 'react-icons/fi';
 import { createMixSample, createSample, errorDetail } from '../api';
+import { isComposing } from '../keys';
 import { href } from '../router';
 import TextButton from './TextButton';
 import WordToggle from './WordToggle';
@@ -13,6 +14,7 @@ export const MIN_SAMPLE_SEC = 0.05; // the backend's MIN_SAMPLE_SECONDS
 /** m:ss.mmm field: typed and committed on Enter/blur; ± steppers on touch. */
 function TimeField({ label, value, onCommit, active, onFocus, disabled, step, steppers }) {
   const [draft, setDraft] = useState(null);
+  const clickFocus = useRef(false);
   const commit = () => {
     if (draft == null) return;
     const t = parseTime(draft);
@@ -41,14 +43,26 @@ function TimeField({ label, value, onCommit, active, onFocus, disabled, step, st
         disabled={disabled}
         value={disabled ? '' : draft ?? fmtTime(value)}
         placeholder="—"
+        // Focus selects the whole time so typing replaces it. A click or tap
+        // would put the caret back at its mouseup, so that first mouseup is
+        // swallowed, and iOS gets a second select once focus has settled.
+        onPointerDown={(e) => {
+          clickFocus.current = document.activeElement !== e.currentTarget;
+        }}
+        onMouseUp={(e) => {
+          if (clickFocus.current) e.preventDefault();
+          clickFocus.current = false;
+        }}
         onFocus={(e) => {
           onFocus?.();
-          e.currentTarget.select();
+          const el = e.currentTarget;
+          el.select();
+          setTimeout(() => document.activeElement === el && el.select(), 0);
         }}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={commit}
         onKeyDown={(e) => {
-          if (e.key === 'Enter') {
+          if (e.key === 'Enter' && !isComposing(e)) {
             commit();
             e.currentTarget.blur();
           } else if (e.key === 'Escape') {
@@ -347,7 +361,7 @@ export default function ExtractPanel({
         setNameTouched(true);
       }}
       onKeyDown={(e) => {
-        if (e.key === 'Enter') {
+        if (e.key === 'Enter' && !isComposing(e)) {
           e.preventDefault();
           if (!e.repeat) save(source === 'mix');
         }
@@ -496,8 +510,13 @@ export default function ExtractPanel({
   }
 
   return (
-    <div ref={rootRef} className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-paper" role="region" aria-label="Extract a sample">
-      <div className="mx-auto flex max-w-[1920px] flex-col gap-1.5 px-4 py-2 text-caption sm:px-6 lg:px-8">
+    <div
+      ref={rootRef}
+      className="rs-dock rs-bottom-bar fixed inset-x-0 bottom-0 z-20 overflow-y-auto overscroll-contain border-t border-line bg-paper"
+      role="region"
+      aria-label="Extract a sample"
+    >
+      <div className="px-safe mx-auto flex max-w-[1920px] flex-col gap-1.5 py-2 text-caption">
         <div className="rs-touch-lines flex flex-wrap items-center gap-x-5 gap-y-1.5">
           <span className="text-h4 leading-none">Extract</span>
           {sourceSelect}

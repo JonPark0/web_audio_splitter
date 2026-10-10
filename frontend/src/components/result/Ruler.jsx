@@ -134,6 +134,7 @@ export default function Ruler({ timeline, bpm, mode, selection, onSeek, height =
     <div>
       <div
         ref={wrapRef}
+        data-axis=""
         className="relative cursor-pointer select-none overflow-hidden"
         style={{ height, touchAction: 'pan-y' }}
         title="Click to move the playhead"

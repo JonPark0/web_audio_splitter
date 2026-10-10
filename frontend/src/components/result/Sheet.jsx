@@ -4,7 +4,9 @@ import TextButton from '../TextButton';
 /**
  * Bottom sheet for phone menus ("⋯"): a paper panel over a paper veil,
  * closed by the veil, Escape or Close. `full` makes it a full-screen page
- * (the phone extract sheet).
+ * (the phone extract sheet). px-safe like the page column: clear of a
+ * landscape notch, and the extract sheet's lane is exactly as wide as the
+ * timeline it draws.
  */
 export default function Sheet({ title, onClose, children, full = false, headerExtra = null }) {
   const panelRef = useRef(null);
@@ -31,8 +33,8 @@ export default function Sheet({ title, onClose, children, full = false, headerEx
         ref={panelRef}
         className={
           full
-            ? 'rs-bottom-bar absolute inset-0 overflow-y-auto overscroll-contain bg-paper px-4'
-            : 'rs-bottom-bar absolute inset-x-0 bottom-0 max-h-[85vh] overflow-y-auto overscroll-contain border-t border-line bg-paper px-4 pb-2'
+            ? 'rs-bottom-bar px-safe absolute inset-0 overflow-y-auto overscroll-contain bg-paper'
+            : 'rs-bottom-bar px-safe absolute inset-x-0 bottom-0 max-h-[85vh] overflow-y-auto overscroll-contain border-t border-line bg-paper pb-2'
         }
       >
         <div className={`flex h-11 items-center gap-3 ${full ? 'sticky top-0 z-10 border-b border-line bg-paper' : ''}`}>

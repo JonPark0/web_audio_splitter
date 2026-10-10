@@ -2,6 +2,8 @@ import { useEffect, useRef } from 'react';
 import { clamp } from './format';
 
 const DRAG_PX = 4;
+const TOUCH_SLOP = 8; // a finger wobbles more than a mouse
+const HOLD_MS = 300; // a held finger may then drag in any direction
 
 /**
  * Pointer gestures for a container of lanes ([data-lane] elements that share
@@ -13,9 +15,11 @@ const DRAG_PX = 4;
  *              starts a new one) · click a [data-marker] = select that sample
  *   touch      tap = seek · horizontal drag = pan (when zoomed; vertical
  *              stays page scroll via touch-action: pan-y) · two fingers =
- *              pinch-zoom every lane together · handles/grab as above
- *   wheel      Ctrl/⌘ (or trackpad pinch) = zoom at the cursor · horizontal
- *              or Shift = pan when zoomed · plain vertical = page scroll
+ *              pinch-zoom every lane together · handles/grab as above, but
+ *              only once the finger moves sideways (or after a short hold),
+ *              so a page scroll that starts on them stays a scroll
+ *   wheel      horizontal or Shift = pan when zoomed · plain vertical = page
+ *              scroll · Ctrl/⌘ zoom is useZoomGestures (whole mixer)
  *
  * Selection updates during a drag are coalesced to one per frame (B8).
  * opts: { timeline, getSelection, onSelect(sel, phase), onSeek(t, track),
@@ -60,6 +64,9 @@ export default function useLaneGestures(ref, opts, deps = []) {
     };
 
     function startPinch() {
+      // A handle/strip drag in progress ends where it is (else onSelect never
+      // gets 'end' and the mixer stays in its dragging state).
+      if (g && !g.still && (g.mode === 'select' || g.mode === 'edge' || g.mode === 'move')) commit();
       const [a, b] = [...touches.values()];
       const lane = laneOf(document.elementFromPoint((a.x + b.x) / 2, (a.y + b.y) / 2)) || g?.lane || el.querySelector('[data-lane]');
       if (!lane) return;
@@ -89,10 +96,13 @@ export default function useLaneGestures(ref, opts, deps = []) {
       const handle = e.target.closest('[data-handle]');
       const grab = e.target.closest('[data-grab]');
       const marker = e.target.closest('[data-marker]');
-      const base = { lane, id: e.pointerId, x0: e.clientX };
+      const base = { lane, id: e.pointerId, x0: e.clientX, y0: e.clientY, at: e.timeStamp, touch: e.pointerType === 'touch' };
       if (handle && sel) {
         const edge = handle.dataset.handle;
-        g = { ...base, mode: 'edge', edge, track: sel.track, fixed: edge === 'start' ? sel.end : sel.start, t0: t, still: true };
+        // off: where in the handle it was grabbed, so the edge doesn't jump
+        // to the finger (a touch handle is 44 px, pushed outward when narrow).
+        const at = edge === 'start' ? sel.start : sel.end;
+        g = { ...base, mode: 'edge', edge, track: sel.track, fixed: edge === 'start' ? sel.end : sel.start, off: t - at, t0: t, still: true };
       } else if (grab && sel) {
         g = { ...base, mode: 'move', track: sel.track, off: t - sel.start, len: sel.end - sel.start, t0: t, still: true };
       } else {
@@ -103,7 +113,6 @@ export default function useLaneGestures(ref, opts, deps = []) {
           t0: t,
           marker: marker?.dataset.marker,
           view0: o().timeline.get().start,
-          touch: e.pointerType === 'touch',
         };
       }
       try {
@@ -126,23 +135,31 @@ export default function useLaneGestures(ref, opts, deps = []) {
       if (!g || e.pointerId !== g.id) return;
       const t = timeAt(localX(g.lane, e.clientX));
       const { snap } = o();
-      if (g.still) {
-        if (Math.abs(e.clientX - g.x0) < DRAG_PX) return; // a tap, so far
-        g.still = false;
+      const dx = Math.abs(e.clientX - g.x0);
+      if (g.touch && (g.still || g.mode === 'pending')) {
+        // Touch: wait for the direction. Mostly vertical is the page scrolling
+        // (the browser takes it over), not a pan or a selection move.
+        const dy = Math.abs(e.clientY - g.y0);
+        if (Math.max(dx, dy) < TOUCH_SLOP) return; // a tap, so far
+        if (dy >= dx && e.timeStamp - g.at < HOLD_MS) {
+          g.still = false;
+          g.mode = 'none';
+          return;
+        }
+      } else if (dx < DRAG_PX && (g.still || g.mode === 'pending')) {
+        return; // a tap, so far
       }
-      if (g.mode === 'pending') {
-        if (Math.abs(e.clientX - g.x0) < DRAG_PX) return;
-        if (g.touch) g.mode = o().timeline.get().zoomed ? 'pan' : 'none';
-        else g.mode = 'select';
-      }
+      g.still = false;
+      if (g.mode === 'pending') g.mode = g.touch ? (o().timeline.get().zoomed ? 'pan' : 'none') : 'select';
       if (g.mode === 'select') {
         const forward = t >= g.t0;
         const raw = forward ? { start: g.t0, end: t } : { start: t, end: g.t0 };
         const s = snap ? snap(raw, forward ? 'end' : 'start', g.track) : raw;
         emit({ start: s.start, end: s.end, track: g.track });
       } else if (g.mode === 'edge') {
-        let start = g.edge === 'start' ? t : g.fixed;
-        let end = g.edge === 'end' ? t : g.fixed;
+        const te = clamp(t - g.off, 0, o().timeline.get().duration);
+        let start = g.edge === 'start' ? te : g.fixed;
+        let end = g.edge === 'end' ? te : g.fixed;
         let moving = g.edge;
         if (start > end) {
           [start, end] = [end, start];
@@ -195,15 +212,9 @@ export default function useLaneGestures(ref, opts, deps = []) {
 
     function onWheel(e) {
       const lane = laneOf(e.target);
-      if (!lane) return;
+      if (!lane || e.ctrlKey || e.metaKey) return;
       const tl = o().timeline;
       const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;
-      if (e.ctrlKey || e.metaKey) {
-        e.preventDefault();
-        const x = localX(lane, e.clientX);
-        tl.zoomTo(tl.get().pps * Math.exp(-e.deltaY * unit * 0.002), tl.timeAt(x), x);
-        return;
-      }
       if (!tl.get().zoomed) return;
       const dx = e.shiftKey && !e.deltaX ? e.deltaY : e.deltaX;
       if (dx && Math.abs(dx) >= Math.abs(e.shiftKey ? 0 : e.deltaY)) {
@@ -229,4 +240,82 @@ export default function useLaneGestures(ref, opts, deps = []) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ref, ...deps]);
+}
+
+/**
+ * Zoom the timeline, not the page: Ctrl/⌘ + wheel (Chrome and Firefox send a
+ * trackpad pinch as that) and Safari's trackpad pinch (gesture* events) over
+ * any [data-zoom] area of `ref` — lanes, spectrograms, the ruler, the label
+ * column — zoom around the pointer. Touch pinches stay with useLaneGestures
+ * (iOS sends gesture* for those too; they're left alone here).
+ */
+export function useZoomGestures(ref, timeline) {
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    const fingers = new Set();
+    let pinch = null;
+
+    // Lanes and the ruler ([data-axis]) share the time axis' left edge/width.
+    const anchor = (target, clientX) => {
+      const area = target?.closest?.('[data-zoom]');
+      const axis = area && (target.closest('[data-lane], [data-axis]') || area.querySelector('[data-lane], [data-axis]'));
+      if (!axis) return null;
+      const r = axis.getBoundingClientRect();
+      const x = clamp(clientX - r.left, 0, r.width);
+      return { x, t: timeline.timeAt(x) };
+    };
+
+    const onWheel = (e) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const a = anchor(e.target, e.clientX);
+      if (!a) return;
+      e.preventDefault();
+      if (pinch) return; // Safari: the gesture events zoom
+      const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;
+      timeline.zoomTo(timeline.get().pps * Math.exp(-e.deltaY * unit * 0.002), a.t, a.x);
+    };
+    const onGestureStart = (e) => {
+      if (fingers.size) return; // a touch pinch
+      const a = anchor(e.target, e.clientX);
+      if (!a) return;
+      e.preventDefault();
+      pinch = { ...a, pps0: timeline.get().pps };
+    };
+    const onGestureChange = (e) => {
+      if (!pinch) return;
+      e.preventDefault();
+      if (fingers.size) {
+        pinch = null;
+        return;
+      }
+      timeline.zoomTo(pinch.pps0 * e.scale, pinch.t, pinch.x);
+    };
+    const onGestureEnd = (e) => {
+      if (!pinch) return;
+      e.preventDefault();
+      pinch = null;
+    };
+    const onDown = (e) => {
+      if (e.pointerType === 'touch') fingers.add(e.pointerId);
+    };
+    const onUp = (e) => fingers.delete(e.pointerId);
+
+    el.addEventListener('wheel', onWheel, { passive: false });
+    el.addEventListener('gesturestart', onGestureStart);
+    el.addEventListener('gesturechange', onGestureChange);
+    el.addEventListener('gestureend', onGestureEnd);
+    el.addEventListener('pointerdown', onDown, true);
+    window.addEventListener('pointerup', onUp, true);
+    window.addEventListener('pointercancel', onUp, true);
+    return () => {
+      el.removeEventListener('wheel', onWheel);
+      el.removeEventListener('gesturestart', onGestureStart);
+      el.removeEventListener('gesturechange', onGestureChange);
+      el.removeEventListener('gestureend', onGestureEnd);
+      el.removeEventListener('pointerdown', onDown, true);
+      window.removeEventListener('pointerup', onUp, true);
+      window.removeEventListener('pointercancel', onUp, true);
+    };
+  }, [ref, timeline]);
 }
