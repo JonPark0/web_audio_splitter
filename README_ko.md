@@ -302,7 +302,7 @@ npm run dev
 - `GET /samples/tags` - 태그별 사용 횟수
 - `GET /samples/{id}` / `PATCH /samples/{id}` / `DELETE /samples/{id}` - 조회, 수정(`name`, `tags`, `bpm`, `key`; `null`을 보내면 bpm/key가 분석값으로 돌아감), 삭제
 - `POST /samples/{id}/analyze` - BPM/키 재분석
-- `GET /samples/{id}/audio` - 샘플 WAV
+- `GET /samples/{id}/audio?download=` - 샘플 WAV; `download=<이름>`을 주면 그 이름의 첨부 파일로 보냄
 - `GET /samples/{id}/render?bpm=&semitones=&cents=` - `bpm`으로 time-stretch / 피치 시프트한 샘플 (한 번 렌더링 후 캐시); `DELETE /samples/renders/cache`로 캐시 비우기
 - `GET /projects` / `POST /projects` - 어레인지 프로젝트 목록 / 생성
 - `GET /projects/{id}` / `PUT /projects/{id}` / `DELETE /projects/{id}` - 조회(샘플 정보 포함), 문서 전체 저장(트랙, 클립, 마커; `base_version`을 보내면 다른 탭이 먼저 저장했을 때 `409`와 현재 문서를 돌려줌), 삭제

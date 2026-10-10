@@ -302,7 +302,7 @@ npm run dev
 - `GET /samples/tags` - Tags with usage counts
 - `GET /samples/{id}` / `PATCH /samples/{id}` / `DELETE /samples/{id}` - Read, edit (`name`, `tags`, `bpm`, `key`; `null` reverts bpm/key to the detected value), delete
 - `POST /samples/{id}/analyze` - Re-run BPM/key detection
-- `GET /samples/{id}/audio` - Sample WAV
+- `GET /samples/{id}/audio?download=` - Sample WAV; with `download=<name>` sent as an attachment under that name
 - `GET /samples/{id}/render?bpm=&semitones=&cents=` - Sample time-stretched to `bpm` / pitch-shifted (rendered once, cached); `DELETE /samples/renders/cache` clears the cache
 - `GET /projects` / `POST /projects` - List / create arrangement projects
 - `GET /projects/{id}` / `PUT /projects/{id}` / `DELETE /projects/{id}` - Read (samples embedded), save the whole document (tracks, clips, markers; send `base_version` to get `409` + the current document if another tab saved first), delete

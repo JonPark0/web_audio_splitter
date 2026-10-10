@@ -12,39 +12,30 @@ export function saveBlob(blob, name) {
   setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
-// URLs being fetched, so repeated taps don't save the file twice.
-const fetching = new Set();
+// The last download started, so a double tap doesn't save the file twice.
+let last = { url: '', at: 0 };
+const REPEAT_MS = 2000;
 
 /**
- * Click handler for a same-origin download link that must keep the
- * `download` name: the server's Content-Disposition filename (the bare
- * sample name) would otherwise win over the attribute, and the BPM/key in
- * "<name>_<bpm>bpm_<key>.wav" would be lost. Fetches into a blob instead;
- * modified clicks (new tab, copy) keep the plain link.
- *
- * Returns a promise that settles once the file is handed over (callers
- * show "Downloading…" meanwhile), or null when the click wasn't taken over
- * or the same file is already on its way.
+ * Click handler for a sample's audio link that saves it as `name`
+ * ("<name>_<bpm>bpm_<key>.wav"): the server's own Content-Disposition name
+ * (the bare sample name) would win over the `download` attribute, so the
+ * click goes to the same URL with ?download=<name>, which the server sends
+ * as an attachment under that name. A plain link: the browser streams it to
+ * disk (iOS Safari and other mobile browsers too), with its own progress.
+ * Modified clicks (new tab, copy) keep the plain, playable link.
  */
 export function downloadAsNamed(e, url, name) {
-  if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return null;
+  if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
   e.preventDefault();
-  if (fetching.has(url)) return null;
-  fetching.add(url);
-  return fetch(url)
-    .then((res) => {
-      if (!res.ok) throw new Error(String(res.status));
-      return res.blob();
-    })
-    .then((blob) => saveBlob(blob, name))
-    .catch(() => {
-      // fall back to a plain download (server's name) rather than nothing
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = name;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-    })
-    .finally(() => fetching.delete(url));
+  const target = `${url}${url.includes('?') ? '&' : '?'}download=${encodeURIComponent(name)}`;
+  const now = Date.now();
+  if (last.url === target && now - last.at < REPEAT_MS) return;
+  last = { url: target, at: now };
+  const a = document.createElement('a');
+  a.href = target;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }
