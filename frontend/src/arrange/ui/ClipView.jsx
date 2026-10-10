@@ -18,7 +18,8 @@ const PENDING_STYLE = {
  * Shows: name, waveform (loop repeats dimmed, reversed mirrored), fade
  * ramps, and a hatch while its server render is still on the way.
  * A swipe that starts here scrolls the timeline (touch-action pan); the
- * Timeline lifts the clip only after a long-press.
+ * Timeline lifts the clip only after a long-press, and shows it `dragging`
+ * from that moment.
  */
 export default memo(function ClipView({
   clip,
@@ -33,7 +34,7 @@ export default memo(function ClipView({
   selected,
   dimmed,
   dragging,
-  pressing,
+  overlapping,
   pending,
   coarse,
   handlePx,
@@ -51,6 +52,9 @@ export default memo(function ClipView({
   const mouseHandles = !coarse;
 
   const flags = [looped && 'loop', clip.reverse && 'rev', (clip.semitones || clip.cents) && pitchLabel(clip)].filter(Boolean);
+  // The overlap hatch can't take the pointer (it would block the clips), so
+  // the clip itself says it.
+  const note = [pending && 'rendering…', overlapping && 'overlaps another clip: both play there'].filter(Boolean).join(' · ');
 
   return (
     <div
@@ -58,14 +62,14 @@ export default memo(function ClipView({
       role="button"
       tabIndex={-1}
       aria-pressed={selected}
-      aria-label={`Clip ${name}${pending ? ' (rendering)' : ''}`}
-      title={pending ? `${name} — rendering…` : name}
+      aria-label={`Clip ${name}${note ? ` (${note})` : ''}`}
+      title={note ? `${name} — ${note}` : name}
       onPointerDown={(e) => onClipPointerDown(e, clip, 'move')}
       // Edge drawn as an inset ink outline (no shadows in the system); a
       // selected clip thickens it like a focused field.
       className={`absolute overflow-hidden bg-wash outline outline-ink ${coarse ? '' : 'cursor-grab'} ${
         selected ? 'z-10 outline-2 -outline-offset-2' : 'outline-1 -outline-offset-1'
-      } ${dimmed ? 'opacity-55' : ''} ${dragging ? 'z-20 cursor-grabbing opacity-80' : ''} ${pressing ? 'opacity-80' : ''}`}
+      } ${dimmed ? 'opacity-55' : ''} ${dragging ? 'z-20 cursor-grabbing opacity-80' : ''}`}
       style={{ left, top, width: Math.max(2, width), height, touchAction: 'pan-x pan-y' }}
     >
       {showLabel && (

@@ -11,6 +11,11 @@
 // creep back in.
 export default {
   content: ['./index.html', './src/**/*.{js,jsx}'],
+  // hover: utilities only where hovering exists, so a tapped control on a
+  // phone doesn't keep its hover look until the next tap elsewhere.
+  future: {
+    hoverOnlyWhenSupported: true,
+  },
   theme: {
     colors: {
       transparent: 'transparent',
@@ -110,5 +115,13 @@ export default {
     ringOffsetWidth: false,
     ringOffsetColor: false,
   },
-  plugins: [],
+  plugins: [
+    // `coarse:` = any touch input (src/device.js MQ.coarse). `any-pointer`,
+    // not `pointer`: a touch laptop or an iPad with a trackpad reports a fine
+    // primary pointer but is still tapped with a finger.
+    ({ addVariant }) => {
+      addVariant('coarse', '@media (any-pointer: coarse)');
+      addVariant('fine', '@media not all and (any-pointer: coarse)');
+    },
+  ],
 }

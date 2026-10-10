@@ -1,3 +1,4 @@
+import { preferPlayback, releasePlayback, resumeContext, watchInterruptions } from '../../audioSession';
 import { createResampler, fetchFrames, fetchWavHeader } from './wav';
 
 /**
@@ -35,6 +36,12 @@ const RAMP = 0.008;
 const KEEP_LOOP_SEC = 30; // loops up to this long stay fully cached
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Save-Data on, or a 2G/3G-class link (Network Information API; Chromium). */
+function leanNetwork() {
+  const c = typeof navigator !== 'undefined' ? navigator.connection : null;
+  return !!c && (c.saveData === true || /^(slow-2g|2g|3g)$/.test(c.effectiveType || ''));
+}
 
 export default class MixEngine {
   constructor({ duration = 0, sampleRate = 0 } = {}) {
@@ -122,7 +129,7 @@ export default class MixEngine {
 
   ensureContext() {
     if (this.ctx) {
-      if (this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
+      resumeContext(this.ctx); // also iOS 'interrupted' (call, Siri, lock)
       return this.ctx;
     }
     const Ctor = window.AudioContext || window.webkitAudioContext;
@@ -137,7 +144,10 @@ export default class MixEngine {
     this.master.connect(this.ctx.destination);
     this.stems.forEach((stem) => this.createNodes(stem));
     this.voices().forEach((v) => v.header && this.prepareVoice(v));
-    if (this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
+    // The system stopped the clock under us (iOS interruption, suspended
+    // background tab): show Paused instead of Pause over a frozen playhead.
+    this.unwatch = watchInterruptions(this.ctx, () => this.isActive(), () => this.pause());
+    resumeContext(this.ctx);
     return this.ctx;
   }
 
@@ -165,6 +175,8 @@ export default class MixEngine {
     this.voices().forEach((v) => v.chunks.forEach((e) => e.controller?.abort()));
     this.queue = [];
     this.listeners.clear();
+    this.unwatch?.();
+    if (this.playing || this.pending != null) releasePlayback();
     this.ctx?.close().catch(() => {});
   }
 
@@ -418,6 +430,10 @@ export default class MixEngine {
    * Must be called from a user gesture the first time (AudioContext policy).
    */
   async play(from = this.pos, { endSec = null, rewindTo = null, solo = null } = {}) {
+    // Synchronously, still inside the click/keydown: iOS only switches to the
+    // playback session (heard with the silent switch on) and resumes an
+    // interrupted context from a gesture.
+    preferPlayback();
     this.ensureContext();
     const gen = ++this.gen;
     this.stopSources();
@@ -474,6 +490,7 @@ export default class MixEngine {
       this.solo = null;
       this.applyGains();
     }
+    releasePlayback();
     this.emitState();
   }
 
@@ -499,6 +516,7 @@ export default class MixEngine {
       this.solo = null;
       this.applyGains();
     }
+    releasePlayback();
     this.emitState('ended');
   }
 
@@ -564,10 +582,16 @@ export default class MixEngine {
       }
     }
     const posF = this.playing ? this.posAtC(nowF) : Math.round(this.pos * sr);
+    const lean = this.playing && leanNetwork();
 
     for (const voice of this.voices()) {
       if (voice.error) continue;
       const audible = this.isAudible(voice.stem, voice);
+      // On Save-Data / a slow mobile link, muted stems and the variant not
+      // being heard don't stream (that was every voice's full WAV): they use
+      // what is cached and load once heard (unmute, A/B), joining late but
+      // sample-aligned.
+      const cachedOnly = lean && !audible;
       const wanted = new Set();
       const maxK = voice.lengthF ? Math.ceil(voice.lengthF / N) - 1 : Infinity;
       if (this.playing) {
@@ -584,6 +608,7 @@ export default class MixEngine {
           for (let k = Math.floor(pA / N); k * N < pB && k <= maxK; k += 1) {
             wanted.add(k);
             if (sched.has(k)) continue;
+            if (cachedOnly && voice.chunks.get(k)?.state !== 'ready') continue;
             const due = (seg.c0 + (Math.max(k * N, seg.p0) - seg.p0) - nowF) / sr;
             const e = this.chunk(voice, k, due + (audible ? 0 : 3));
             if (e.state === 'ready') {

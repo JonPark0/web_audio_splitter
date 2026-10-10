@@ -33,7 +33,6 @@ export default function DeleteControl({ busy, onDelete, confirming: confirmingPr
       {/* the question is what the reader acts on, so ink (muted is for asides) */}
       <span>Delete?</span>
       <TextButton
-        autoFocus
         disabled={busy}
         className={COARSE}
         onClick={async () => {
@@ -46,7 +45,9 @@ export default function DeleteControl({ busy, onDelete, confirming: confirmingPr
       >
         Confirm
       </TextButton>
-      <TextButton muted disabled={busy} onClick={() => setConfirming(false)} className={COARSE}>
+      {/* Focus lands on Cancel, Confirm is one Tab away: on Confirm, the
+          next Space (play) or Enter (rename) deleted the sample. */}
+      <TextButton autoFocus muted disabled={busy} onClick={() => setConfirming(false)} className={COARSE}>
         Cancel
       </TextButton>
     </span>

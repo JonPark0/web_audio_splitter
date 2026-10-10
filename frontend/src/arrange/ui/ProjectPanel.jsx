@@ -1,12 +1,13 @@
 import React from 'react';
 import { FiX } from 'react-icons/fi';
 import TextButton from '../../components/TextButton';
+import { MOD } from '../../keys';
 import { CommitField, Group } from './fields';
 import InlineName from './InlineName';
 import { formatBarBeat, parseBarBeat } from './snap';
 
 const SIGNATURES = Array.from({ length: 16 }, (_, i) => i + 1);
-const btn = '[@media(pointer:coarse)]:min-h-[44px] justify-center';
+const btn = 'coarse:min-h-[44px] justify-center';
 
 /**
  * Project-level settings shown when no clip is selected (desktop dock) or
@@ -66,7 +67,7 @@ export default function ProjectPanel({ project, variant = 'dock', onLoopChange, 
             value={bpb}
             onChange={(e) => onMetaChange({ beats_per_bar: Number(e.target.value) })}
             aria-label="Beats per bar"
-            className="ainput w-14 !pb-0.5 [@media(pointer:coarse)]:min-h-[44px] [@media(pointer:coarse)]:text-p"
+            className="ainput w-14 !pb-0.5 coarse:min-h-[44px] coarse:text-p"
           >
             {SIGNATURES.map((n) => (
               <option key={n} value={n}>
@@ -88,14 +89,14 @@ export default function ProjectPanel({ project, variant = 'dock', onLoopChange, 
                   value={m.name || 'Marker'}
                   label="Marker name"
                   onCommit={(name) => onRenameMarker(m.id, name)}
-                  className="max-w-[10rem] text-caption [@media(pointer:coarse)]:min-h-[44px]"
+                  className="max-w-[10rem] text-caption coarse:min-h-[44px]"
                   inputClassName="w-28 text-caption"
                 />
                 <TextButton
                   muted
                   onClick={() => onJump(m.beat)}
                   title="Jump to this marker"
-                  className="tabular-nums [@media(pointer:coarse)]:min-h-[44px] justify-center"
+                  className="tabular-nums coarse:min-h-[44px] justify-center"
                 >
                   {formatBarBeat(m.beat, bpb)}
                 </TextButton>
@@ -104,7 +105,7 @@ export default function ProjectPanel({ project, variant = 'dock', onLoopChange, 
                   label=""
                   onClick={() => onDeleteMarker(m.id)}
                   aria-label={`Delete marker ${m.name || formatBarBeat(m.beat, bpb)}`}
-                  className="items-center justify-center [@media(pointer:coarse)]:min-h-[44px] [@media(pointer:coarse)]:min-w-[44px]"
+                  className="items-center justify-center coarse:min-h-[44px] coarse:min-w-[44px]"
                 >
                   <FiX className="icon" strokeWidth={1.5} aria-hidden="true" />
                 </TextButton>
@@ -115,7 +116,7 @@ export default function ProjectPanel({ project, variant = 'dock', onLoopChange, 
       </div>
       {showHints && (
         <p className="m-0 truncate text-caption">
-          Click a clip to edit · drag an empty lane to select · S splits · Ctrl/Cmd+C/V copy/paste · ←/→ nudge · L loop · Home · +/− zoom · Space
+          Click a clip to edit · drag an empty lane to select · S splits · {MOD}+C/V copy/paste · ←/→ nudge · L loop · Home · +/− zoom · Space
         </p>
       )}
     </div>

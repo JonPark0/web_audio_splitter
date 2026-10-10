@@ -1,5 +1,6 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
 import { RECOVERY_MODELS, SEPARATION_MODELS, errorDetail, youtubeDownload, youtubeInfo } from '../api';
+import { isComposing } from '../keys';
 import { href } from '../router';
 import Field from './Field';
 import RecoveryControls from './RecoveryControls';
@@ -16,6 +17,7 @@ import {
   cancelUploads,
   isActive,
   removeItem,
+  retryItem,
   startUploads,
   useUploadQueue,
 } from './jobs/uploadQueue';
@@ -49,6 +51,14 @@ function saveSettings(settings) {
 
 const isFileDrag = (e) => Array.from(e.dataTransfer?.types || []).includes('Files');
 
+// "a, b, c and 2 more"
+const someNames = (names) => names.slice(0, 3).join(', ') + (names.length > 3 ? ` and ${names.length - 3} more` : '');
+
+// Enter that confirms an IME composition must not submit the form.
+const holdComposingEnter = (e) => {
+  if (e.key === 'Enter' && isComposing(e)) e.preventDefault();
+};
+
 function itemStateText(item) {
   switch (item.state) {
     case 'waiting':
@@ -71,9 +81,11 @@ function itemStateText(item) {
  * restoration, and the CTA. Files upload one after another with byte
  * progress and can be cancelled; every file becomes its own job in the jobs
  * list next to it. Settings are remembered between visits. Files can be
- * dropped anywhere on the page.
+ * dropped anywhere on the page. On phones the CTA is a fixed bottom bar;
+ * `onBarHeight(px)` reports its height (0 when it isn't fixed) so the page
+ * can pad for it.
  */
-export default function UploadScreen() {
+export default function UploadScreen({ onBarHeight }) {
   const [saved] = useState(loadSettings);
   const [inputMode, setInputMode] = useState(saved.inputMode === 'youtube' ? 'youtube' : 'file');
   const [model, setModel] = useState(
@@ -93,7 +105,9 @@ export default function UploadScreen() {
   const items = useUploadQueue();
   const fileId = useId();
   const urlId = useId();
+  const urlRef = useRef(null);
   const statusRef = useRef(null);
+  const barRef = useRef(null);
 
   useEffect(() => {
     saveSettings({ inputMode, model, recover, recoveryModel, autoSplit });
@@ -105,35 +119,45 @@ export default function UploadScreen() {
   const locked = uploading || !!ytBusy;
 
   const takeFiles = (fileList) => {
-    const { added, rejected } = addFiles(fileList);
+    const { added, rejected, tooBig, maxMB } = addFiles(fileList);
     if (added) {
       setInputMode('file');
       setMessage(null);
     }
+    const skipped = [];
     if (rejected.length) {
-      const names = rejected.slice(0, 3).join(', ') + (rejected.length > 3 ? ` and ${rejected.length - 3} more` : '');
-      setError(
+      skipped.push(
         `Skipped ${rejected.length === 1 ? 'a file that isn’t' : `${rejected.length} files that aren’t`} audio${
           VIDEO_ACCEPTED ? ' or video' : ''
-        }: ${names}`
+        }: ${someNames(rejected)}`
       );
-    } else if (added) {
-      setError('');
     }
+    // Over the server's limit: say so now, not after minutes of uploading.
+    if (tooBig.length) {
+      skipped.push(
+        `Skipped ${tooBig.length === 1 ? 'a file' : `${tooBig.length} files`} over the ${maxMB} MB limit: ${someNames(tooBig)}`
+      );
+    }
+    if (skipped.length) setError(skipped.join('. '));
+    else if (added) setError('');
   };
   const takeFilesRef = useRef(takeFiles);
   takeFilesRef.current = takeFiles;
 
   // Page-wide drop target. An enter/leave counter keeps the wash steady
-  // while the drag crosses child elements.
+  // while the drag crosses child elements; anything that ends a drag without
+  // balancing it (drop, dragend, leaving the window, switching apps) resets.
   useEffect(() => {
     let depth = 0;
+    let leaveTimer = 0;
     const reset = () => {
+      clearTimeout(leaveTimer);
       depth = 0;
       setDragging(false);
     };
     const onEnter = (e) => {
       if (!isFileDrag(e)) return;
+      clearTimeout(leaveTimer);
       depth += 1;
       setDragging(true);
     };
@@ -141,9 +165,19 @@ export default function UploadScreen() {
       if (!isFileDrag(e)) return;
       depth = Math.max(0, depth - 1);
       if (!depth) setDragging(false);
+      // No element to go to: the drag left the window, whatever the counter
+      // says (an element removed mid-drag never sends its dragleave). Safari
+      // leaves relatedTarget null on every dragleave, so wait for the
+      // dragover that follows when the drag is still on the page.
+      else if (e.relatedTarget === null) {
+        clearTimeout(leaveTimer);
+        leaveTimer = setTimeout(reset, 300);
+      }
     };
     const onOver = (e) => {
-      if (!isFileDrag(e) || e.defaultPrevented) return;
+      if (!isFileDrag(e)) return;
+      clearTimeout(leaveTimer);
+      if (e.defaultPrevented) return;
       e.preventDefault();
       e.dataTransfer.dropEffect = 'copy';
     };
@@ -158,12 +192,15 @@ export default function UploadScreen() {
     window.addEventListener('dragover', onOver);
     window.addEventListener('drop', onDrop);
     window.addEventListener('dragend', reset);
+    window.addEventListener('blur', reset);
     return () => {
+      clearTimeout(leaveTimer);
       window.removeEventListener('dragenter', onEnter);
       window.removeEventListener('dragleave', onLeave);
       window.removeEventListener('dragover', onOver);
       window.removeEventListener('drop', onDrop);
       window.removeEventListener('dragend', reset);
+      window.removeEventListener('blur', reset);
     };
   }, []);
 
@@ -172,6 +209,23 @@ export default function UploadScreen() {
   useEffect(() => {
     if (error) statusRef.current?.scrollIntoView?.({ block: 'nearest' });
   }, [error]);
+
+  // The phone bar's real height (it grows with a two-line status, larger
+  // text or the home-indicator inset), for the page's bottom padding.
+  const onBarHeightRef = useRef(onBarHeight);
+  onBarHeightRef.current = onBarHeight;
+  useEffect(() => {
+    const el = barRef.current;
+    if (!el || !onBarHeightRef.current) return undefined;
+    const report = () =>
+      onBarHeightRef.current?.(getComputedStyle(el).position === 'fixed' ? Math.ceil(el.getBoundingClientRect().height) : 0);
+    report();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(report);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const barFixed = () => !!barRef.current && getComputedStyle(barRef.current).position === 'fixed';
 
   const submitFiles = () => {
     if (!ready.length || uploading) return;
@@ -192,13 +246,20 @@ export default function UploadScreen() {
       setYtBusy('Starting the download...');
       const dl = await youtubeDownload({ url, model, recover, recoveryModel, autoSplit });
       setMessage({
-        text: `Downloading “${info.data.title}”${autoSplit ? ' — it splits when the download is done.' : ' — review it once it’s in.'}`,
+        text: 'Downloading',
+        name: info.data.title,
+        note: autoSplit ? 'it splits when the download is done.' : 'review it once it’s in.',
         href: href(`/split/job/${dl.data.task_id}`),
       });
       setYoutubeUrl('');
+      // close the phone keyboard: the outcome is in the bottom bar under it
+      urlRef.current?.blur();
       jobsChanged();
     } catch (e) {
       setError(errorDetail(e, 'Could not fetch that link.'));
+      // on phones the error is in that bar too; on wider screens keep the
+      // field focused for fixing the link
+      if (barFixed()) urlRef.current?.blur();
     } finally {
       setYtBusy('');
     }
@@ -210,18 +271,20 @@ export default function UploadScreen() {
     else submitYoutube();
   };
 
-  // A finished batch: say what happened.
-  const batchItems = items.filter((i) => i.state === 'done' || i.state === 'error');
+  // A finished batch: say what happened (the latest one only — failed rows
+  // of an earlier batch stay listed until retried or removed).
+  const ended = items.filter((i) => i.state === 'done' || i.state === 'error');
+  const lastBatch = Math.max(0, ...ended.map((i) => i.batch || 0));
+  const batchItems = ended.filter((i) => i.batch === lastBatch);
   const doneItems = batchItems.filter((i) => i.state === 'done');
   const batchSummary =
     !uploading && doneItems.length
-      ? {
-          text:
-            doneItems.length === 1
-              ? `Queued “${doneItems[0].file.name}”.`
-              : `${doneItems.length} jobs queued${batchItems.length > doneItems.length ? `, ${batchItems.length - doneItems.length} failed` : ''}.`,
-          href: doneItems.length === 1 ? href(`/split/job/${doneItems[0].taskId}`) : null,
-        }
+      ? doneItems.length === 1
+        ? { text: 'Queued', name: doneItems[0].file.name, href: href(`/split/job/${doneItems[0].taskId}`) }
+        : {
+            text: `${doneItems.length} jobs queued${batchItems.length > doneItems.length ? `, ${batchItems.length - doneItems.length} failed` : ''}.`,
+            href: null,
+          }
       : null;
 
   let ctaLabel;
@@ -233,8 +296,15 @@ export default function UploadScreen() {
   const batchTotal = active ? items.filter((i) => i.batch === active.batch).length : 0;
   const batchIndex = active ? items.filter((i) => i.batch === active.batch && (i.state === 'done' || i.state === 'error')).length + 1 : 0;
   const progressValue = active ? (active.total ? Math.min(1, active.loaded / active.total) : 'indeterminate') : ytBusy ? 'indeterminate' : null;
+  // Nothing left to stop while the last file is being checked (it is on
+  // the server already and becomes a job either way).
+  const canCancel = uploading && !(active?.state === 'checking' && !items.some((i) => i.state === 'waiting'));
 
+  // Numbers and links before names, so the phone bar's two-line clamp only
+  // ever cuts a long file or video title (the explanation after a title
+  // waits for wider screens).
   let statusLine = null;
+  let statusHref = null;
   if (error) {
     statusLine = (
       <span role="alert">
@@ -246,20 +316,32 @@ export default function UploadScreen() {
     statusLine = (
       <span className="tabular-nums">
         {batchTotal > 1 ? `${batchIndex}/${batchTotal} · ` : ''}
-        <span className="break-all">{active.file.name}</span> · {itemStateText(active)}
+        {itemStateText(active)} · <span className="break-words">{active.file.name}</span>
       </span>
     );
   } else if (ytBusy) {
     statusLine = <span>{ytBusy}</span>;
   } else if (message || batchSummary) {
     const m = message || batchSummary;
+    statusHref = m.href;
     statusLine = (
       <span>
-        {m.text}{' '}
+        {m.text}
+        {m.name && (
+          <>
+            {' '}
+            <span className="break-words">“{m.name}”</span>
+          </>
+        )}
+        {m.note && <span className="max-sm:hidden"> — {m.note}</span>}
+        {/* on phones Open sits beside the status, out of the clamp */}
         {m.href && (
-          <a href={m.href} data-label="Open" className="link">
-            Open
-          </a>
+          <span className="max-sm:hidden">
+            {' '}
+            <a href={m.href} data-label="Open" className="link">
+              Open
+            </a>
+          </span>
         )}
       </span>
     );
@@ -321,8 +403,8 @@ export default function UploadScreen() {
                 }`}
               >
                 <span data-label="Drop audio files or choose" className="link shrink-0 whitespace-nowrap group-hover:[--_w:400]">
-                  <span className="[@media(pointer:coarse)]:hidden">Drop audio files or choose</span>
-                  <span className="hidden [@media(pointer:coarse)]:inline">Choose audio files</span>
+                  <span className="coarse:hidden">Drop audio files or choose</span>
+                  <span className="hidden coarse:inline">Choose audio files</span>
                 </span>
                 <span className="min-w-0 text-right text-caption leading-tight text-muted">
                   {VIDEO_ACCEPTED ? 'Audio or video' : 'Audio'} · several at once
@@ -336,6 +418,16 @@ export default function UploadScreen() {
                   <li key={item.key} className="flex min-h-7 flex-wrap items-center gap-x-3">
                     <span className="min-w-0 flex-1 truncate">{item.file.name}</span>
                     {item.state !== 'error' && <span className="shrink-0 tabular-nums text-muted">{itemStateText(item)}</span>}
+                    {item.state === 'error' && item.retryable && (
+                      <TextButton
+                        className="shrink-0"
+                        label="Retry"
+                        aria-label={`Retry ${item.file.name}`}
+                        onClick={() => retryItem(item.key)}
+                      >
+                        Retry
+                      </TextButton>
+                    )}
                     {item.state === 'done' && item.taskId ? (
                       <a href={href(`/split/job/${item.taskId}`)} data-label="Open" className="link shrink-0">
                         Open
@@ -360,20 +452,26 @@ export default function UploadScreen() {
                 ))}
               </ul>
             )}
+            {uploading && (
+              <p className="m-0 hidden text-caption coarse:block">Keep this screen on until the upload finishes.</p>
+            )}
           </>
         ) : (
           <div className="flex flex-col gap-1">
             <Field inline label="Link" htmlFor={urlId}>
               <input
+                ref={urlRef}
                 id={urlId}
                 type="url"
                 inputMode="url"
+                enterKeyHint="go"
                 autoComplete="off"
                 spellCheck={false}
                 placeholder="https://www.youtube.com/watch?v=..."
                 value={youtubeUrl}
                 disabled={!!ytBusy}
                 onChange={(e) => setYoutubeUrl(e.target.value)}
+                onKeyDown={holdComposingEnter}
                 className="ainput"
               />
             </Field>
@@ -409,8 +507,12 @@ export default function UploadScreen() {
         />
 
         {/* The CTA: inline from 640px; on phones a fixed bottom bar that also
-            carries upload progress and errors, so it's always in reach. */}
-        <div className="max-sm:fixed max-sm:inset-x-0 max-sm:bottom-0 max-sm:z-30 max-sm:border-t max-sm:border-line max-sm:bg-paper max-sm:px-4 max-sm:pb-[env(safe-area-inset-bottom)] sm:pt-1">
+            carries upload progress and errors, so it's always in reach. Its
+            sides clear a landscape notch (as .px-safe does). */}
+        <div
+          ref={barRef}
+          className="max-sm:fixed max-sm:inset-x-0 max-sm:bottom-0 max-sm:z-30 max-sm:border-t max-sm:border-line max-sm:bg-paper max-sm:pb-[env(safe-area-inset-bottom)] max-sm:pl-[max(1rem,env(safe-area-inset-left))] max-sm:pr-[max(1rem,env(safe-area-inset-right))] sm:pt-1"
+        >
           <div className="relative flex min-h-14 items-center gap-x-4 sm:min-h-0 sm:flex-col sm:items-start sm:gap-y-1">
             {progressValue !== null && (
               <div className="max-sm:absolute max-sm:inset-x-0 max-sm:-top-px sm:order-last sm:w-full">
@@ -422,7 +524,7 @@ export default function UploadScreen() {
                 {ctaLabel}
               </TextButton>
               {uploading && (
-                <TextButton onClick={cancelUploads} className="max-sm:hidden">
+                <TextButton onClick={cancelUploads} disabled={!canCancel} className="max-sm:hidden">
                   Cancel upload
                 </TextButton>
               )}
@@ -435,9 +537,14 @@ export default function UploadScreen() {
               {statusLine}
             </div>
             {uploading && (
-              <TextButton onClick={cancelUploads} className="shrink-0 sm:hidden" label="Cancel">
+              <TextButton onClick={cancelUploads} disabled={!canCancel} className="shrink-0 sm:hidden" label="Cancel">
                 Cancel
               </TextButton>
+            )}
+            {statusHref && (
+              <a href={statusHref} data-label="Open" className="link shrink-0 sm:hidden">
+                Open
+              </a>
             )}
           </div>
         </div>

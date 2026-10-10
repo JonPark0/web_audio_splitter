@@ -9,6 +9,20 @@ export function engineCall(fn) {
   return Promise.resolve().then(fn);
 }
 
+/**
+ * engineCall, but `fn` runs right now instead of in a microtask: play() has
+ * to reach the AudioContext inside the user's tap or key press, or iOS keeps
+ * it suspended (and on silent) - and a context interrupted by a call stays
+ * that way.
+ */
+export function engineNow(fn) {
+  try {
+    return Promise.resolve(fn());
+  } catch (e) {
+    return Promise.reject(e);
+  }
+}
+
 /** Fire-and-forget variant for teardown paths: swallow everything. */
 export function engineTry(fn) {
   try {

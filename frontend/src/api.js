@@ -48,7 +48,8 @@ export function errorDetail(err, fallback = 'Something went wrong') {
 
 // onProgress({ loaded, total }) reports upload bytes; `signal` (an
 // AbortController's) cancels the upload. The server validates the file
-// (400 not audio / too long, 413 too large) before queuing the job.
+// (400 not audio / too long, 413 too large) before queuing the job; the
+// size limit is also known up front from getLimits().
 export function uploadFile({ file, model, recover, recoveryModel, onProgress, signal }) {
   const formData = new FormData();
   formData.append('file', file);
@@ -59,6 +60,25 @@ export function uploadFile({ file, model, recover, recoveryModel, onProgress, si
     signal,
     onUploadProgress: onProgress ? (e) => onProgress({ loaded: e.loaded, total: e.total }) : undefined,
   });
+}
+
+/**
+ * The server's limits, { max_upload_mb, max_duration_seconds }, fetched once.
+ * Resolves null when the server has no /limits (older backend) — the upload
+ * itself still enforces them; any other failure is retried next call.
+ */
+let limitsRequest = null;
+export function getLimits() {
+  if (!limitsRequest) {
+    limitsRequest = axios.get(`${API_BASE}/limits`).then(
+      (res) => (Number.isFinite(res.data?.max_upload_mb) ? res.data : null),
+      (e) => {
+        if (e.response?.status !== 404) limitsRequest = null;
+        return null;
+      }
+    );
+  }
+  return limitsRequest;
 }
 
 export function youtubeInfo(url) {

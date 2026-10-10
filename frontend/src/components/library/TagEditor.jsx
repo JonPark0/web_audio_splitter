@@ -1,5 +1,6 @@
-import React, { useId, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import { FiX } from 'react-icons/fi';
+import { isComposing } from '../../keys';
 import { COARSE, TOUCH_TEXT } from './ui';
 
 // Lower-cased and space-collapsed so "Drums" and "drums " filter as one tag.
@@ -24,20 +25,64 @@ export function TagDatalist({ id, tags }) {
  * Tag chips (plain words, × to remove) plus an input that adds on Enter,
  * comma or blur (B7: tags typed then clicked away from used to be lost),
  * suggesting the library's existing tags.
+ *
+ * The field stays enabled while a save runs: disabling it dropped focus
+ * after every Enter (closing a phone's keyboard, losing what was typed
+ * next). Changes queue instead, each one built on the tags the previous
+ * one wrote, and the chips show that pending list until the last returns.
+ * Mount it with key={sample.id}: the queue belongs to one sample.
  */
-export default function TagEditor({ sample, busy, onPatch, allTags = [] }) {
-  const tags = sample.tags || [];
+export default function TagEditor({ sample, onPatch, allTags = [] }) {
+  const [pending, setPending] = useState(null); // tags while saves are queued
+  const tags = pending || sample.tags || [];
   const [draft, setDraft] = useState('');
   const listId = useId();
+  const queueRef = useRef({ tail: Promise.resolve(), count: 0, tags: null });
 
-  const add = () => {
-    // Commas split so a pasted "drums, loop" becomes two tags.
-    const fresh = parseTags(draft).filter((t) => !tags.includes(t));
-    setDraft('');
-    if (fresh.length) onPatch({ tags: [...tags, ...fresh] });
+  const save = (next) => {
+    const q = queueRef.current;
+    q.tags = next;
+    q.count += 1;
+    setPending(next);
+    q.tail = q.tail
+      .then(() => onPatch({ tags: next }))
+      .finally(() => {
+        q.count -= 1;
+        if (!q.count) {
+          q.tags = null;
+          setPending(null); // the server's list (or the old one, if it failed)
+        }
+      });
   };
 
-  const remove = (tag) => onPatch({ tags: tags.filter((t) => t !== tag) });
+  const addFrom = (text) => {
+    // Commas split so a pasted "drums, loop" becomes two tags.
+    const current = queueRef.current.tags || sample.tags || [];
+    const fresh = parseTags(text).filter((t) => !current.includes(t));
+    if (fresh.length) save([...current, ...fresh]);
+  };
+
+  const add = () => {
+    setDraft('');
+    addFrom(draft);
+  };
+
+  const remove = (tag) => save((queueRef.current.tags || sample.tags || []).filter((t) => t !== tag));
+
+  // Unmounted mid-word (sheet closed with the field still focused - a tap on
+  // iOS doesn't blur it - or the inspector swapped for a sheet at 1280 px):
+  // keep the word. (A field still in the page is StrictMode's rehearsal.)
+  const fieldRef = useRef(null);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const addFromRef = useRef(addFrom);
+  addFromRef.current = addFrom;
+  useEffect(
+    () => () => {
+      if (!fieldRef.current?.isConnected && draftRef.current.trim()) addFromRef.current(draftRef.current);
+    },
+    []
+  );
 
   return (
     <div className="flex min-w-0 flex-wrap items-baseline gap-x-4 gap-y-1">
@@ -47,7 +92,6 @@ export default function TagEditor({ sample, busy, onPatch, allTags = [] }) {
           <span className="truncate">{tag}</span>
           <button
             type="button"
-            disabled={busy}
             onClick={() => remove(tag)}
             aria-label={`Remove tag ${tag}`}
             title="Remove tag"
@@ -58,9 +102,9 @@ export default function TagEditor({ sample, busy, onPatch, allTags = [] }) {
         </span>
       ))}
       <input
+        ref={fieldRef}
         type="text"
         value={draft}
-        disabled={busy}
         list={listId}
         placeholder="Add tag"
         aria-label={`Add tag to ${sample.name}`}
@@ -68,22 +112,29 @@ export default function TagEditor({ sample, busy, onPatch, allTags = [] }) {
           const v = e.target.value;
           // a typed comma commits what's before it
           if (v.endsWith(',')) {
-            const fresh = parseTags(v).filter((t) => !tags.includes(t));
             setDraft('');
-            if (fresh.length) onPatch({ tags: [...tags, ...fresh] });
+            addFrom(v);
           } else {
             setDraft(v);
           }
         }}
         onBlur={add}
         onKeyDown={(e) => {
-          e.stopPropagation();
-          if (e.key === 'Enter') {
+          // The Enter/Escape that ends an IME composition belongs to the IME
+          // (committing here split "드럼" into "드럼" + "럼").
+          if (isComposing(e)) {
+            e.stopPropagation();
+            return;
+          }
+          if (e.key === 'Escape') {
+            // a draft to drop: drop it; none: let the sheet close
+            if (!draft) return;
+            setDraft('');
+          } else if (e.key === 'Enter') {
             e.preventDefault();
             add();
-          } else if (e.key === 'Escape') {
-            setDraft('');
           }
+          e.stopPropagation();
         }}
         className={`ainput w-28 !pb-0.5 ${TOUCH_TEXT}`}
       />

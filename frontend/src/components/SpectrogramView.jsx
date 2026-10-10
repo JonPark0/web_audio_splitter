@@ -14,6 +14,8 @@ const SPEC_TOP = 64;
  * stretched/scrolled with the shared timeline), so restored high frequencies
  * line up with what you see and hear. Follows the row's Original/Recovered
  * choice. Generated on demand server-side (ffmpeg), so only when opened.
+ * It answers the lane gestures as part of the stem's lane (data-lane): tap
+ * to seek, drag to select, pinch to zoom.
  */
 export default function SpectrogramView({ taskId, trackName, variant, timeline, height = 64, sampleRate }) {
   const view = useTimelineView(timeline);
@@ -35,7 +37,13 @@ export default function SpectrogramView({ taskId, trackName, variant, timeline, 
   const nyquist = sampleRate ? `0–${Math.round(sampleRate / 2000)} kHz` : '';
 
   return (
-    <div className="relative overflow-hidden border-t border-line" style={{ height }} aria-label={`${trackName.replace('.wav', '')} spectrogram (${variant})`} role="img">
+    <div
+      data-lane={trackName}
+      className="rs-lane relative overflow-hidden border-t border-line"
+      style={{ height }}
+      aria-label={`${trackName.replace('.wav', '')} spectrogram (${variant})`}
+      role="img"
+    >
       {!failed && (
         <img
           key={src}

@@ -79,7 +79,7 @@ const SampleItem = memo(function SampleItem({ sample, playing, coarse, onToggleP
       onDragEnd={() => {
         sampleDrag.current = null;
       }}
-      title={coarse ? 'Tap to place on a lane' : 'Drag onto a track'}
+      title={coarse ? 'Tap to place on a lane' : 'Click to preview, drag onto a track'}
       className={`flex items-center gap-2 ${coarse ? 'min-h-[56px]' : 'min-h-[40px] cursor-grab active:cursor-grabbing'}`}
     >
       <TextButton
@@ -89,7 +89,7 @@ const SampleItem = memo(function SampleItem({ sample, playing, coarse, onToggleP
         aria-pressed={playing}
         title={playing ? 'Stop preview' : 'Preview'}
         current={playing}
-        className="min-h-[32px] min-w-[28px] shrink-0 items-center justify-center [@media(pointer:coarse)]:min-h-[44px] [@media(pointer:coarse)]:min-w-[44px]"
+        className="min-h-[32px] min-w-[28px] shrink-0 items-center justify-center coarse:min-h-[44px] coarse:min-w-[44px]"
       >
         {playing ? <FiSquare className="icon" strokeWidth={1.5} aria-hidden="true" /> : <FiPlay className="icon" strokeWidth={1.5} aria-hidden="true" />}
       </TextButton>
@@ -104,7 +104,9 @@ const SampleItem = memo(function SampleItem({ sample, playing, coarse, onToggleP
           <span className="w-full truncate text-caption tabular-nums text-muted">{meta.join(' · ')}</span>
         </button>
       ) : (
-        <div className="flex min-w-0 flex-1 flex-col transition-opacity duration-140 hover:opacity-55">
+        // Mouse: a click previews (as in a DAW browser); the play button and
+        // Add keep keyboard access.
+        <div onClick={() => onTogglePlay(sample)} className="flex min-w-0 flex-1 flex-col transition-opacity duration-140 hover:opacity-55">
           <span className="truncate leading-tight">{sample.name}</span>
           <span className="truncate text-caption tabular-nums text-muted">{meta.join(' · ')}</span>
         </div>
@@ -113,7 +115,7 @@ const SampleItem = memo(function SampleItem({ sample, playing, coarse, onToggleP
         muted
         onClick={() => onAdd(sample)}
         title="Add at the playhead on the selected track"
-        className="shrink-0 pr-1 text-caption [@media(pointer:coarse)]:min-h-[44px] [@media(pointer:coarse)]:min-w-[44px] justify-center"
+        className="shrink-0 pr-1 text-caption coarse:min-h-[44px] coarse:min-w-[44px] justify-center"
       >
         Add
       </TextButton>
@@ -123,8 +125,8 @@ const SampleItem = memo(function SampleItem({ sample, playing, coarse, onToggleP
 
 /**
  * Library samples to arrange: debounced search; with a mouse drag a row onto
- * a lane (or click / Add to place it at the playhead); on touch tap a row,
- * then tap a lane to place it. Preview plays through one shared element.
+ * a lane (click previews it, Add places it at the playhead); on touch tap a
+ * row, then tap a lane to place it. Preview plays through one shared element.
  */
 export default function SampleBrowser({ onAdd, onArm, onError, coarse, className = '' }) {
   const [q, setQ] = useState('');
@@ -176,7 +178,7 @@ export default function SampleBrowser({ onAdd, onArm, onError, coarse, className
           onKeyDown={(e) => e.stopPropagation()}
           placeholder="Search samples"
           aria-label="Search samples"
-          className="ainput !pb-1 [@media(pointer:coarse)]:min-h-[44px] [@media(pointer:coarse)]:text-p"
+          className="ainput !pb-1 coarse:min-h-[44px] coarse:text-p"
         />
         <span className="shrink-0 text-caption tabular-nums text-muted">{status === 'ready' ? samples.length : ''}</span>
       </div>

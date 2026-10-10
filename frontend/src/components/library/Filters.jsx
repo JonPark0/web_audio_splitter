@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { isComposing, parseDecimal } from '../../keys';
 import { KEYS, SORT_OPTIONS } from '../../samplesApi';
 import { formatKey } from './format';
 import { Popover } from './Sheet';
@@ -34,10 +35,12 @@ export function useDraft(value, commit, delay = 400) {
   return [draft, setDraft, flush];
 }
 
-const stop = (e) => e.stopPropagation();
+// Keys stay in the field (Space, arrows, Delete aren't list shortcuts
+// here) - except Escape, which closes the sheet/popover around it.
+const stop = (e) => e.key !== 'Escape' && e.stopPropagation();
 
 /** The tag checklist: popover on desktop, inside the filter sheet on touch. */
-export function TagChecklist({ tags, selected, onChange, rowClass = 'min-h-8 px-3' }) {
+export function TagChecklist({ tags, selected, onChange, rowClass = 'min-h-8 px-3 coarse:min-h-11' }) {
   const [find, setFind] = useState('');
   // Keep selected tags listed even if they've dropped out of the counts.
   const all = [...selected.filter((t) => !tags.some((x) => x.name === t)).map((name) => ({ name, count: 0 })), ...tags];
@@ -51,7 +54,14 @@ export function TagChecklist({ tags, selected, onChange, rowClass = 'min-h-8 px-
           type="search"
           value={find}
           onChange={(e) => setFind(e.target.value)}
-          onKeyDown={stop}
+          onKeyDown={(e) => {
+            // Escape empties the search first, then closes
+            if (e.key === 'Escape' && find && !isComposing(e)) {
+              e.preventDefault();
+              setFind('');
+            }
+            stop(e);
+          }}
           placeholder="Find tag"
           aria-label="Find tag"
           className={`ainput my-2 w-auto !pb-1 ${rowClass.includes('px-3') ? 'mx-3' : 'mx-4 sm:mx-6'} ${TOUCH_TEXT}`}
@@ -84,7 +94,7 @@ export function TagFilterButton({ tags, selected, onChange }) {
         type="button"
         aria-haspopup="dialog"
         aria-expanded={!!anchor}
-        onClick={(e) => setAnchor(anchor ? null : e.currentTarget.getBoundingClientRect())}
+        onClick={(e) => setAnchor(anchor ? null : e.currentTarget)}
         className={`ainput flex w-auto max-w-[10rem] shrink-0 cursor-pointer items-center gap-1 whitespace-nowrap !pb-0.5 text-left ${
           selected.length ? 'weight-up' : ''
         }`}
@@ -142,21 +152,27 @@ export function SortSelect({ value, onChange, className = '', id = 'lib-sort' })
   );
 }
 
+// The URL gets a plain number: "92,5" from a European keypad -> "92.5".
+const toBpmParam = (text) => {
+  const n = parseDecimal(text);
+  return Number.isFinite(n) ? String(n) : '';
+};
+
+// Text with a decimal keypad rather than type=number: that rejects "92,5"
+// and turns a wheel over the focused field into a tempo change.
 function BpmInput({ value, onCommit, label, id }) {
-  const [draft, setDraft, flush] = useDraft(value, onCommit, 500);
+  const [draft, setDraft, flush] = useDraft(value, (v) => onCommit(toBpmParam(v)), 500);
   return (
     <input
       id={id}
-      type="number"
+      type="text"
       inputMode="decimal"
-      min="20"
-      max="999"
       value={draft}
-      onChange={(e) => setDraft(e.target.value)}
+      onChange={(e) => setDraft(e.target.value.replace(/[^\d.,]/g, ''))}
       onBlur={flush}
       onKeyDown={(e) => {
         stop(e);
-        if (e.key === 'Enter') flush();
+        if (e.key === 'Enter' && !isComposing(e)) flush();
       }}
       placeholder={label === 'BPM min' ? 'min' : 'max'}
       aria-label={label}

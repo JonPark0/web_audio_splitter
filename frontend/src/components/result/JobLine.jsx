@@ -12,7 +12,12 @@ function DownloadAll({ taskId, recovered, compact }) {
   useEffect(() => {
     if (!open) return undefined;
     const close = (e) => !ref.current?.contains(e.target) && setOpen(false);
-    const esc = (e) => e.key === 'Escape' && setOpen(false);
+    const esc = (e) => {
+      if (e.key !== 'Escape') return;
+      // Closing the menu is all this Escape does (not also Extract/selection).
+      e.stopPropagation();
+      setOpen(false);
+    };
     document.addEventListener('pointerdown', close);
     document.addEventListener('keydown', esc);
     return () => {
@@ -57,7 +62,8 @@ function DownloadAll({ taskId, recovered, compact }) {
 
 /**
  * The job, in one 32 px line: name · model · stems · duration · tempo · key,
- * then Retry, Download all and ← Jobs.
+ * then Retry, Download all and ← Jobs. Under 640 px the details get a second
+ * line (the name and three actions left them no room).
  */
 export default function JobLine({ taskId, result, bpm, songKey, duration, retrying, onRetry, phone }) {
   const stems = result.tracks?.length || 0;
@@ -69,23 +75,29 @@ export default function JobLine({ taskId, result, bpm, songKey, duration, retryi
     bpm ? `${Math.round(bpm * 10) / 10} BPM` : null,
     songKey,
   ].filter(Boolean);
+  const details = meta.join(' · ');
   return (
-    <div className="flex h-8 min-w-0 items-center gap-x-4 text-caption [@media(pointer:coarse)]:h-11">
-      <h1 className="m-0 min-w-0 max-w-[50%] shrink-0 truncate text-p font-light leading-8" title={result.name}>
-        {result.name || 'Stems'}
-      </h1>
-      <span className="min-w-0 flex-1 truncate text-muted" title={meta.join(' · ')}>
-        {meta.join(' · ')}
-      </span>
-      <span className="flex shrink-0 items-center gap-x-4">
-        <TextButton muted current={retrying} aria-expanded={retrying} onClick={onRetry} className="rs-hit" title="Run this job again with other settings">
-          Retry
-        </TextButton>
-        <DownloadAll taskId={taskId} recovered={result.recovered} compact={phone} />
-        <TextButton as="a" href={href('/split')} className="rs-hit" title="All jobs">
-          ← Jobs
-        </TextButton>
-      </span>
+    <div className="min-w-0 text-caption">
+      <div className="flex h-8 min-w-0 items-center gap-x-4 coarse:h-11">
+        <h1 className="m-0 min-w-0 max-w-[50%] shrink-0 truncate text-p font-light leading-8 max-sm:max-w-none max-sm:flex-1" title={result.name}>
+          {result.name || 'Stems'}
+        </h1>
+        <span className="min-w-0 flex-1 truncate text-muted max-sm:hidden" title={details}>
+          {details}
+        </span>
+        <span className="flex shrink-0 items-center gap-x-4">
+          <TextButton muted current={retrying} aria-expanded={retrying} onClick={onRetry} className="rs-hit" title="Run this job again with other settings">
+            Retry
+          </TextButton>
+          <DownloadAll taskId={taskId} recovered={result.recovered} compact={phone} />
+          <TextButton as="a" href={href('/split')} className="rs-hit" title="All jobs">
+            ← Jobs
+          </TextButton>
+        </span>
+      </div>
+      <p className="m-0 truncate pb-1 leading-5 text-muted sm:hidden" title={details}>
+        {details}
+      </p>
     </div>
   );
 }

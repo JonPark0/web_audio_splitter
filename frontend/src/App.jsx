@@ -67,13 +67,13 @@ export default function App() {
     <div className="min-h-screen bg-paper">
       <button
         type="button"
-        className="link sr-only text-caption focus:not-sr-only focus:fixed focus:left-4 focus:top-14 focus:z-50 focus:bg-paper"
+        className="link sr-only text-caption focus:not-sr-only focus:fixed focus:left-[max(1rem,env(safe-area-inset-left))] focus:top-14 focus:z-50 focus:bg-paper"
         onClick={() => document.getElementById('main')?.focus()}
       >
         Skip to content
       </button>
       <Header route={route} />
-      <main id="main" tabIndex={-1} className="mx-auto w-full max-w-[1920px] px-4 outline-none sm:px-6 lg:px-8">
+      <main id="main" tabIndex={-1} className="px-safe mx-auto w-full max-w-[1920px] outline-none">
         <ErrorBoundary resetKey={route.path}>
           <Suspense fallback={<Loading />}>
             <Screen route={route} />

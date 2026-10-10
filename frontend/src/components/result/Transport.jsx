@@ -46,7 +46,7 @@ function IconButton({ onClick, label, children, disabled, big }) {
       disabled={disabled}
       aria-label={label}
       title={label}
-      className={`link rs-hit items-center justify-center ${big ? 'h-11 w-11' : '[@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:min-w-11'}`}
+      className={`link rs-hit items-center justify-center ${big ? 'h-11 w-11' : 'coarse:h-11 coarse:min-w-11'}`}
     >
       {children}
     </button>
@@ -134,7 +134,7 @@ export default function Transport({
   options,
 }) {
   return (
-    <div className="flex h-11 min-w-0 items-center gap-x-5 text-caption">
+    <div className="flex h-11 min-w-0 items-center gap-x-5 text-caption max-xl:gap-x-4 max-md:gap-x-3">
       <PlayButton playing={playing} pending={pending} onToggle={onToggle} />
       <TimeReadout timeline={timeline} duration={duration} className="text-p" />
       <TextButton
@@ -182,7 +182,7 @@ export default function Transport({
 /** Phone: the one bottom bar — Play, time, − + Fit, ⋯ (everything else). */
 export function PhoneBar({ timeline, duration, playing, pending, onToggle, onZoomIn, onZoomOut, onFit, zoomed, onMore }) {
   return (
-    <div className="rs-bottom-bar fixed inset-x-0 bottom-0 z-30 border-t border-line bg-paper">
+    <div className="rs-bottom-bar pl-safe-inset pr-safe-inset fixed inset-x-0 bottom-0 z-30 border-t border-line bg-paper">
       <div className="flex h-14 items-center px-2">
         <PlayButton big playing={playing} pending={pending} onToggle={onToggle} />
         <TimeReadout timeline={timeline} duration={duration} short className="min-w-0 flex-1 truncate px-1 text-caption" />

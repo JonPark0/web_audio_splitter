@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { GRID } from './SampleRow';
+import { CHECKBOX, GRID } from './SampleRow';
 
 // Column → [ascending, descending] backend sort keys.
 const SORTS = {
@@ -20,7 +20,7 @@ function SortButton({ column, sort, onSort, children, align = 'left' }) {
         type="button"
         onClick={() => onSort(next)}
         title={`Sort by ${String(children).toLowerCase()}`}
-        className={`link text-caption [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11 [@media(pointer:coarse)]:justify-center ${active ? 'is-current' : ''} ${align === 'right' ? 'items-end' : 'items-start'}`}
+        className={`link text-caption coarse:min-h-11 coarse:min-w-11 coarse:justify-center ${active ? 'is-current' : ''} ${align === 'right' ? 'items-end' : 'items-start'}`}
         data-label={`${children} ↓`}
       >
         <span>
@@ -45,7 +45,7 @@ export default function TableHeader({ size, sort, onSort, checkState, onCheckAll
   return (
     <div
       role="row"
-      className={`sticky z-10 grid ${GRID[size]} h-8 items-center border-b border-line bg-paper [@media(pointer:coarse)]:h-11`}
+      className={`sticky z-10 grid ${GRID[size]} h-8 items-center border-b border-line bg-paper coarse:h-11`}
       style={{ top }}
     >
       <label role="columnheader" className="flex h-full cursor-pointer items-center justify-center">
@@ -55,7 +55,7 @@ export default function TableHeader({ size, sort, onSort, checkState, onCheckAll
           checked={checkState === 'all'}
           onChange={onCheckAll}
           aria-label="Select all loaded samples"
-          className={`m-0 cursor-pointer ${tablet ? 'h-5 w-5' : 'h-3.5 w-3.5'}`}
+          className={`m-0 cursor-pointer ${CHECKBOX[size]}`}
         />
       </label>
       {/* sr-only text inside a cell: an sr-only cell itself would leave the grid flow */}

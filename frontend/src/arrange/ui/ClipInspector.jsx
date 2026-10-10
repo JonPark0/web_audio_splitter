@@ -1,8 +1,9 @@
 import React, { useRef, useState } from 'react';
 import { FiMinus, FiPlus } from 'react-icons/fi';
 import TextButton from '../../components/TextButton';
+import { MOD } from '../../keys';
 import { MAX_BPM, MIN_BPM, canWarp, clipDurationBeats, clipDurationSeconds, clipRate, clipRegionBeats, isLooped } from '../project';
-import { CommitField, Group } from './fields';
+import { CommitField, Group, ResetValue, parseNumber } from './fields';
 import { MIN_DB, dbToGain, formatBarBeat, formatBeats, formatBpm, formatDb, gainToDb } from './snap';
 
 export const MIN_SEMITONES = -24;
@@ -23,8 +24,8 @@ function findClip(project, id) {
 
 const signed = (v, unit) => (v ? `${v > 0 ? '+' : '−'}${Math.abs(v)}${unit}` : `0${unit}`);
 
-const iconBtn = 'min-w-[20px] items-center justify-center [@media(pointer:coarse)]:min-h-[44px] [@media(pointer:coarse)]:min-w-[44px]';
-const wordBtn = '[@media(pointer:coarse)]:min-h-[44px] justify-center';
+const iconBtn = 'min-w-[20px] items-center justify-center coarse:min-h-[44px] coarse:min-w-[44px]';
+const wordBtn = 'coarse:min-h-[44px] justify-center';
 
 /** On/Off word toggle (Palnarium: current weight when on). */
 function Toggle({ on, onChange, disabled, title, label }) {
@@ -65,8 +66,11 @@ function PitchControl({ clips, onApply, className = '' }) {
       <CommitField
         value={commonSt}
         label="Semitones"
-        inputMode="numeric"
-        parse={(t) => (Number.isFinite(Number(t)) ? clampSemitones(Number(t)) : null)}
+        inputMode="text"
+        parse={(t) => {
+          const n = parseNumber(t);
+          return n === null ? null : clampSemitones(n);
+        }}
         onCommit={(v) => apply(() => ({ semitones: v }))}
         className="w-9 text-center"
       />
@@ -82,8 +86,11 @@ function PitchControl({ clips, onApply, className = '' }) {
       <CommitField
         value={commonCt}
         label="Cents"
-        inputMode="numeric"
-        parse={(t) => (Number.isFinite(Number(t)) ? clampCents(Number(t)) : null)}
+        inputMode="text"
+        parse={(t) => {
+          const n = parseNumber(t);
+          return n === null ? null : clampCents(n);
+        }}
         onCommit={(v) => apply(() => ({ cents: v }))}
         className="w-10 text-center"
         title="Fine pitch, −100..100 cents"
@@ -142,8 +149,8 @@ function SampleBpmControl({ clip, sample, beatsPerBar, onSampleBpm, className = 
         label="Sample BPM"
         format={(v) => (v == null ? '' : formatBpm(v))}
         parse={(t) => {
-          const n = Number(t);
-          return Number.isFinite(n) && inBpmRange(n) ? roundBpm(n) : null;
+          const n = parseNumber(t);
+          return n !== null && inBpmRange(n) ? roundBpm(n) : null;
         }}
         onCommit={(v) => set(v)}
         className="w-14"
@@ -175,13 +182,13 @@ function SampleBpmControl({ clip, sample, beatsPerBar, onSampleBpm, className = 
 function ClipActions({ onDuplicate, onDuplicateNextBar, onSplit, onDelete, compact }) {
   return (
     <div className={`flex flex-wrap items-center ${compact ? 'gap-x-4' : 'gap-x-5'} gap-y-1 text-caption`}>
-      <TextButton muted onClick={onDuplicate} title="Duplicate right after (Ctrl/Cmd+D)" className={wordBtn}>
+      <TextButton muted onClick={onDuplicate} title={`Duplicate right after (${MOD}+D)`} className={wordBtn}>
         Duplicate
       </TextButton>
       <TextButton muted onClick={onDuplicateNextBar} title="Copy to the next bar line" className={wordBtn}>
         Next bar
       </TextButton>
-      <TextButton muted onClick={onSplit} title="Split at the playhead (S or Ctrl/Cmd+E)" className={wordBtn}>
+      <TextButton muted onClick={onSplit} title={`Split at the playhead (S or ${MOD}+E)`} className={wordBtn}>
         Split
       </TextButton>
       <TextButton muted onClick={onDelete} title="Delete (Del / Backspace)" className={wordBtn}>
@@ -261,8 +268,8 @@ export default function ClipInspector({
       label={key === 'fade_in_sec' ? 'Fade in (ms)' : 'Fade out (ms)'}
       inputMode="numeric"
       parse={(t) => {
-        const n = Number(t);
-        return Number.isFinite(n) && n >= 0 ? Math.round(n) : null;
+        const n = parseNumber(t);
+        return n !== null && n >= 0 ? Math.round(n) : null;
       }}
       onCommit={(ms) => {
         const other = key === 'fade_in_sec' ? clip.fade_out_sec || 0 : clip.fade_in_sec || 0;
@@ -300,8 +307,8 @@ export default function ClipInspector({
                 label="Loop length (beats)"
                 format={(v) => formatBeats(v)}
                 parse={(t) => {
-                  const n = Number(t);
-                  return Number.isFinite(n) && n >= 1 / 16 ? n : null;
+                  const n = parseNumber(t);
+                  return n !== null && n >= 1 / 16 ? n : null;
                 }}
                 onCommit={(v) => patch({ loop_beats: v }, { resolve: true })}
                 className="w-12"
@@ -322,7 +329,7 @@ export default function ClipInspector({
 
         <PitchControl clips={[clip]} onApply={onPatchClips} className={sheet ? 'col-span-2' : ''} />
 
-        <Group label={`Gain · ${formatDb(clip.gain)}`} title="Clip gain (double-click resets)" className={sheet ? '' : 'w-36'}>
+        <Group label="Gain" title="Clip gain (double-click the slider or tap the value to reset)" className={sheet ? '' : 'w-44'}>
           <input
             type="range"
             min={MIN_DB}
@@ -331,10 +338,13 @@ export default function ClipInspector({
             value={gainToDb(clip.gain)}
             onChange={(e) => patch({ gain: Math.min(4, Math.round(dbToGain(parseFloat(e.target.value)) * 10000) / 10000) }, { coalesce: `gain:${clip.id}` })}
             onDoubleClick={() => patch({ gain: 1 })}
-            className="slider [@media(pointer:coarse)]:h-11"
+            className="slider w-auto min-w-0 flex-1 coarse:h-11"
             aria-label="Clip gain"
             aria-valuetext={formatDb(clip.gain)}
           />
+          <ResetValue onReset={() => patch({ gain: 1 })} label="Reset clip gain to 0 dB">
+            {formatDb(clip.gain)}
+          </ResetValue>
         </Group>
 
         <Group label="Fade in · out (ms)">

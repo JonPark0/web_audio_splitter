@@ -3,11 +3,16 @@ import { getTasks } from '../../api';
 import { href } from '../../router';
 import { jobsPaneMounted, onJobsChanged, publishFromTasks, useInFlight } from '../jobs/jobsStore';
 import usePoll from './usePoll';
+import { revealHeading, revealOnArrival } from './useRouteFocus';
 
 /**
  * "2 running" in the header, linking to the jobs list. It polls /tasks for
  * `in_flight` itself (every 3 s while something runs, else 20 s) only when
  * no jobs list is on screen — that one publishes the same number.
+ *
+ * Where a jobs list is on screen (the Split home, a job) it scrolls to that
+ * list instead of navigating (on phones it is below the form or the job);
+ * elsewhere it opens /split at the list rather than at the top.
  */
 export default function JobsBadge({ className = '' }) {
   const n = useInFlight();
@@ -35,6 +40,11 @@ export default function JobsBadge({ className = '' }) {
       data-label={label}
       aria-label={`${n} ${n === 1 ? 'job' : 'jobs'} running — show jobs`}
       className={`link relative shrink-0 whitespace-nowrap text-caption ${className}`}
+      onClick={(e) => {
+        if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; // new tab / window
+        if (revealHeading('jobs-heading')) e.preventDefault();
+        else revealOnArrival('jobs-heading');
+      }}
     >
       {label}
       {/* the same sliding hairline as running rows */}

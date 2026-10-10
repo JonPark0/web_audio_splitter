@@ -15,7 +15,7 @@
 .rs-hit {
   position: relative;
 }
-@media (pointer: coarse) {
+@media (any-pointer: coarse) {
   .rs-hit::before {
     content: '';
     position: absolute;
@@ -29,7 +29,7 @@
 
 /* Wrapping control lines (docked extract panel): on touch every item is a
    44 px line of its own height, so hit areas of wrapped lines can't overlap. */
-@media (pointer: coarse) {
+@media (any-pointer: coarse) {
   .rs-touch-lines {
     row-gap: 0;
   }
@@ -43,9 +43,9 @@
 }
 
 /* dB fader: a tick at the 0 dB detent (thumb travel is inset by half the
-   9 px thumb at both ends). */
+   thumb at both ends: 9 px, or the 28 px touch hit area - see .slider). */
 .rs-fader {
-  --rs-x: calc(4.5px + (100% - 9px) * var(--rs-zero-frac, 0.8889));
+  --rs-x: calc(var(--thumb, 9px) / 2 + (100% - var(--thumb, 9px)) * var(--rs-zero-frac, 0.8889));
   background-image: linear-gradient(
     to right,
     transparent var(--rs-x),
@@ -57,14 +57,14 @@
   background-position: center;
   background-size: 100% 7px;
 }
-@media (pointer: coarse) {
+@media (any-pointer: coarse) {
   .rs-fader {
     height: 44px;
   }
 }
 
 /* Inputs: 16 px on touch so iOS doesn't zoom the page on focus. */
-@media (pointer: coarse) {
+@media (any-pointer: coarse) {
   .rs-input {
     font-size: 16px;
   }
@@ -72,6 +72,20 @@
 
 .rs-bottom-bar {
   padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Docked extract panel: at most half the screen (its touch lines wrap to
+   five or six 44 px rows on a tablet), less on a short window; the rest
+   scrolls inside it. vh first for browsers without dvh. */
+.rs-dock {
+  max-height: 50vh;
+  max-height: 50dvh;
+}
+@media (max-height: 600px) {
+  .rs-dock {
+    max-height: 40vh;
+    max-height: 40dvh;
+  }
 }
 
 /* Spectrogram strip: ffmpeg's colour map on black → ink on paper. */

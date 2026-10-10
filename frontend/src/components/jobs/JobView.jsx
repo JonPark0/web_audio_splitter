@@ -177,11 +177,14 @@ export default function JobView({ taskId }) {
   const ended = status === 'failed' || status === 'cancelled' || status === 'download_failed';
 
   // Desktop: the job on the left, the live jobs list on the right (switch
-  // jobs without going back); below it on smaller screens.
+  // jobs without going back); below it on smaller screens. The sticky column
+  // scrolls on its own once it outgrows the screen (Retry open on a 768 px
+  // tall iPad), or "Start retry" would sit below the visible edge; its 8 px
+  // inner gutter keeps focus rings inside that scroll box.
   return (
     <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:gap-8 2xl:grid-cols-[minmax(0,5fr)_minmax(0,6fr)]">
       <div className="lg:border-r lg:border-line">
-        <div className="flex flex-col gap-3 py-3 sm:py-4 lg:sticky lg:top-12 lg:pr-8">
+        <div className="flex flex-col gap-3 py-3 sm:py-4 lg:sticky lg:top-12 lg:-ml-2 lg:max-h-[calc(100dvh-3rem)] lg:overflow-y-auto lg:overscroll-contain lg:pl-2 lg:pr-8">
           <div className="flex flex-col gap-1">
             <BackLink />
             <div className="flex flex-wrap items-baseline gap-x-4 gap-y-0">

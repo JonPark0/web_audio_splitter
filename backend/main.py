@@ -394,6 +394,13 @@ def upload_audio(
     return {"task_id": task_id}
 
 
+@app.get("/limits")
+def limits():
+    """Upload limits, so the client can refuse an oversized file before
+    sending it (the size check above only runs once the whole file is in)."""
+    return {"max_upload_mb": MAX_UPLOAD_MB, "max_duration_seconds": MAX_DURATION_SECONDS}
+
+
 @app.post("/youtube/info")
 def youtube_info(url: str = Form(...)):
     """Validate a YouTube URL and return video metadata without downloading."""

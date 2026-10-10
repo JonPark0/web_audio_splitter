@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { MOD, shortcutKey } from '../../keys';
 import { href, setQuery, useRoute } from '../../router';
 import {
   SORT_OPTIONS,
@@ -113,6 +114,7 @@ const CTX_KEYS = [
   'remove',
   'dismissError',
   'addToArrange',
+  'download',
 ];
 
 export default function LibraryScreen() {
@@ -123,7 +125,7 @@ export default function LibraryScreen() {
   const onFilters = useCallback((patch) => setQuery(toQuery(patch)), []);
   const onClear = useCallback(() => setQuery(CLEAR), []);
 
-  const { size, wide } = useLayout();
+  const { size, wide, keys } = useLayout();
   const phone = size === 'phone';
 
   // Restore the last view of this exact query (B10): rows loaded, scroll, selection.
@@ -220,6 +222,22 @@ export default function LibraryScreen() {
   useEffect(() => {
     if (playingId && list.loaded && !list.stale && !byId.has(playingId)) preview.stop();
   }, [playingId, byId, list.loaded, list.stale]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Crossing 1280 px (iPad rotation, Split View, a resize) docks or undocks
+  // the inspector: one inspector at a time - the dock replaces an open
+  // inspector sheet, and a sheet takes over from the dock if you were in it
+  // (its fields save what was typed as they unmount). A ⋯ menu anchored to
+  // a row that just changed layout goes.
+  const dockFocusRef = useRef(false);
+  const wasDockedRef = useRef(docked);
+  useEffect(() => {
+    if (wasDockedRef.current === docked) return;
+    wasDockedRef.current = docked;
+    if (docked) setSheet((s) => (s?.type === 'inspector' ? null : s));
+    else if (!wide && dockFocusRef.current && selectedId) setSheet({ type: 'inspector', id: selectedId }); // not on Hide
+    dockFocusRef.current = false;
+  }, [docked]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => setMenu(null), [size]);
 
   // --- import (P6) ----------------------------------------------------------
   const queue = useImportQueue({
@@ -342,6 +360,18 @@ export default function LibraryScreen() {
     }
   };
 
+  // One WAV, fetched so it keeps its BPM/key name - a moment on a long
+  // sample or a slow link, after the menu/sheet has already closed, so say
+  // so. Taps while it's on its way are ignored (they saved duplicates).
+  const download = (e, sample) => {
+    const name = downloadName(sample);
+    const pending = downloadAsNamed(e, sampleAudioUrl(sample), name);
+    if (!pending) return;
+    const note = { message: `Downloading ${name}…`, ms: 60000 };
+    setToast(note);
+    pending.finally(() => setToast((t) => (t === note ? null : t)));
+  };
+
   const handlers = {
     rowClick(sample, e) {
       if (e.shiftKey || e.metaKey || e.ctrlKey) {
@@ -372,9 +402,10 @@ export default function LibraryScreen() {
       if (playingId !== sample.id || !preview.seek(ratio)) preview.play(sample, { at: ratio });
     },
     toggleCheck,
-    openMenu(sample, rect) {
+    openMenu(sample, button) {
       setSelectedId(sample.id);
-      setMenu({ id: sample.id, rect });
+      // the same ⋯ again closes it
+      setMenu((m) => (m?.id === sample.id ? null : { id: sample.id, anchor: button }));
     },
     openActions(sample) {
       setSelectedId(sample.id);
@@ -387,6 +418,7 @@ export default function LibraryScreen() {
     remove,
     dismissError: (id) => setRowError(id, null),
     addToArrange,
+    download,
   };
   const handlersRef = useRef(handlers);
   handlersRef.current = handlers;
@@ -422,7 +454,8 @@ export default function LibraryScreen() {
       select(s.id, { play: auto, focus: true });
       if (list.hasMore && i > samples.length - 10) list.loadMore();
     };
-    switch (e.key) {
+    // letters by physical key too: with a Hangul layout L arrives as 'ㅣ'
+    switch (e.key.length === 1 ? shortcutKey(e) : e.key) {
       case 'ArrowDown':
       case 'ArrowUp':
         if (mod) return;
@@ -452,12 +485,10 @@ export default function LibraryScreen() {
         else setConfirmingId(current.id);
         break;
       case 'l':
-      case 'L':
         if (mod) return;
         setLoop((v) => !v);
         break;
       case 'a':
-      case 'A':
         if (!mod) return;
         e.preventDefault();
         setChecked(new Set(samples.map((s) => s.id)));
@@ -551,13 +582,31 @@ export default function LibraryScreen() {
     }
   };
 
-  const bulkTag = async ({ add = [], remove: drop = [] }) => {
+  // Tag batches queue: the tag field stays usable while one runs, and two
+  // batches over the same samples at once would each drop the other's tags.
+  // Each batch reads what the previous one wrote (`written`), since the
+  // list may not have re-rendered in between.
+  const tagQueueRef = useRef({ tail: Promise.resolve(), count: 0, written: new Map() });
+  const runBulkTagRef = useRef(null);
+  const bulkTag = (change) => {
+    const q = tagQueueRef.current;
+    q.count += 1;
+    q.tail = q.tail
+      .then(() => runBulkTagRef.current(change))
+      .finally(() => {
+        q.count -= 1;
+        if (!q.count) q.written.clear();
+      });
+  };
+
+  runBulkTagRef.current = async ({ add = [], remove: drop = [] }) => {
+    const { written } = tagQueueRef.current;
     setBulkBusy(true);
     let done = 0;
     const ids = checkedIds;
     const failed = [];
     const updated = await pool(ids, 4, async (id) => {
-      const s = checkedSample(id);
+      const s = written.get(id) || checkedSample(id);
       const cur = s?.tags || [];
       const next = [...new Set([...cur.filter((t) => !drop.includes(t)), ...add])];
       if (s && next.length === cur.length && next.every((t, i) => t === cur[i])) {
@@ -567,6 +616,7 @@ export default function LibraryScreen() {
       try {
         const res = await updateSample(id, { tags: next });
         bulkSamplesRef.current.set(id, res.data);
+        written.set(id, res.data);
         return res.data;
       } catch (err) {
         failed.push(s?.name || id);
@@ -658,17 +708,19 @@ export default function LibraryScreen() {
   }, [checked, byId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const tagPanel = (
-    <BulkTagPanel count={checked.size} present={tagPresent} allTags={allTags} onApply={bulkTag} busy={bulkBusy} />
+    <BulkTagPanel count={checked.size} present={tagPresent} allTags={allTags} onApply={bulkTag} />
   );
 
   // --- per-sample action list (⋯ menu / phone action sheet) ---------------
+  // Keyboard hints only where there's likely a keyboard (`keys`).
+  const keyHint = (hint) => (keys ? hint : undefined);
   const actionsFor = (sample, { sheetMode }) => {
     const playing = playingId === sample.id;
     const taskId = sample.source?.task_id;
     return [
       { key: 'play', label: playing ? 'Stop' : 'Play', onSelect: () => preview.toggle(sample) },
       ...(!docked ? [{ key: 'edit', label: 'Edit details…', hint: 'BPM, key, tags', onSelect: () => (wide ? setInspectorOpen(true) : setSheet({ type: 'inspector', id: sample.id })) }] : []),
-      ...(!phone ? [{ key: 'rename', label: 'Rename', hint: 'Enter', onSelect: () => setRenamingId(sample.id) }] : []),
+      ...(!phone ? [{ key: 'rename', label: 'Rename', hint: keyHint('Enter'), onSelect: () => setRenamingId(sample.id) }] : []),
       { key: 'arrange', label: 'Add to Arrange', hint: project ? project.name : 'new project', onSelect: () => addToArrange(sample) },
       ...(taskId ? [{ key: 'split', label: 'Open in Split', href: href(`/split/job/${taskId}`) }] : []),
       {
@@ -677,14 +729,14 @@ export default function LibraryScreen() {
         hint: downloadName(sample),
         href: sampleAudioUrl(sample),
         download: downloadName(sample),
-        onClick: (e) => downloadAsNamed(e, sampleAudioUrl(sample), downloadName(sample)),
+        onClick: (e) => download(e, sample),
       },
       { key: 'analyze', label: 'Re-analyze', hint: 'keeps your BPM/key', onSelect: () => analyze(sample.id), disabled: sample.analysis_status === 'pending' },
-      { key: 'check', label: checked.has(sample.id) ? 'Unselect' : 'Select', hint: phone ? 'or long-press' : 'Shift-click for a range', onSelect: () => toggleCheck(sample.id, false) },
+      { key: 'check', label: checked.has(sample.id) ? 'Unselect' : 'Select', hint: phone ? 'or long-press' : keyHint('Shift-click for a range'), onSelect: () => toggleCheck(sample.id, false) },
       {
         key: 'delete',
         label: 'Delete…',
-        hint: phone ? undefined : 'Del',
+        hint: phone ? undefined : keyHint('Del'),
         onSelect: () => (sheetMode ? setSheet({ type: 'confirm', id: sample.id }) : setConfirmingId(sample.id)),
       },
     ];
@@ -696,11 +748,11 @@ export default function LibraryScreen() {
     ...(!wide
       ? [
           { key: 'auto', label: `Auto-play on select: ${auto ? 'on' : 'off'}`, onSelect: () => setAuto(!auto) },
-          { key: 'loop', label: `Loop: ${loop ? 'on' : 'off'}`, hint: 'L', onSelect: () => setLoop(!loop) },
+          { key: 'loop', label: `Loop: ${loop ? 'on' : 'off'}`, hint: keyHint('L'), onSelect: () => setLoop(!loop) },
         ]
       : []),
     ...(wide ? [{ key: 'inspector', label: inspectorOpen ? 'Hide inspector' : 'Show inspector', onSelect: () => setInspectorOpen(!inspectorOpen) }] : []),
-    ...(list.matched ? [{ key: 'all', label: `Select all ${list.matched}`, hint: 'Ctrl+A: loaded', onSelect: selectAllMatched }] : []),
+    ...(list.matched ? [{ key: 'all', label: `Select all ${list.matched}`, hint: keyHint(`${MOD}+A: loaded`), onSelect: selectAllMatched }] : []),
   ];
 
   const audition = { auto, setAuto, loop, setLoop, sync, setSync, manualBpm, setManualBpm: (v) => setManualBpm(v) };
@@ -713,7 +765,7 @@ export default function LibraryScreen() {
   // --- render -------------------------------------------------------------
   const toolbar = (
     <div
-      className="sticky z-20 -mx-4 border-b border-line bg-paper px-4 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8"
+      className="bleed-safe sticky z-20 border-b border-line bg-paper"
       style={{ top: HEADER_PX }}
     >
       {phone ? (
@@ -941,8 +993,11 @@ export default function LibraryScreen() {
             aria-label="Inspector"
             className="sticky w-[360px] shrink-0 self-start overflow-y-auto overscroll-contain border-l border-line pl-6"
             style={{ top: stickyTop, maxHeight: `calc(100vh - ${stickyTop}px)` }}
+            onFocus={() => (dockFocusRef.current = true)}
+            onBlur={() => (dockFocusRef.current = false)}
           >
             <Inspector
+              keys={keys}
               sample={selected}
               busy={selected ? !!busyIds[selected.id] : false}
               playing={!!selected && playingId === selected.id}
@@ -963,7 +1018,7 @@ export default function LibraryScreen() {
       )}
 
       {menu && menuSample && (
-        <Popover anchor={menu.rect} onClose={() => setMenu(null)} width={300} label={`Actions for ${menuSample.name}`}>
+        <Popover anchor={menu.anchor} onClose={() => setMenu(null)} width={300} label={`Actions for ${menuSample.name}`}>
           <ActionList items={actionsFor(menuSample, { sheetMode: false })} dense onDone={() => setMenu(null)} />
         </Popover>
       )}
@@ -1040,6 +1095,7 @@ export default function LibraryScreen() {
           tagPanel={tagPanel}
           busy={bulkBusy}
           progress={bulkProgress}
+          playing={playingSample ? { sample: playingSample, loading: loadingId === playingSample.id, onStop: preview.stop } : null}
         />
       )}
 

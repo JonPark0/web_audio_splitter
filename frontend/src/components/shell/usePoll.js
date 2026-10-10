@@ -3,7 +3,9 @@ import { useCallback, useEffect, useRef } from 'react';
 /**
  * Self-scheduling poll: the next request is only queued once the previous one
  * settles (slow responses never overlap), it pauses while the tab is hidden
- * and fetches at once when it's shown again.
+ * and fetches at once when it's shown again — or when the window regains
+ * focus, the network comes back, or the page returns from the back/forward
+ * cache (a phone switching apps doesn't always send visibilitychange).
  *
  *   const refresh = usePoll(async (ctx) => {
  *     const res = await getThing();
@@ -29,6 +31,7 @@ export default function usePoll(fn, interval, deps = [], enabled = true) {
     let running = false;
     let again = false;
     let timer = null;
+    let started = 0;
     const ctx = { stale: () => stopped };
 
     const run = async () => {
@@ -41,6 +44,7 @@ export default function usePoll(fn, interval, deps = [], enabled = true) {
       }
       if (document.hidden) return; // resumed by visibilitychange
       running = true;
+      started = Date.now();
       let result;
       try {
         result = await fnRef.current(ctx);
@@ -59,10 +63,16 @@ export default function usePoll(fn, interval, deps = [], enabled = true) {
       if (iv) timer = setTimeout(run, iv);
     };
 
-    const onVisible = () => {
-      if (!document.hidden && !done) run();
+    // Coming back usually fires several of these at once (visibilitychange
+    // then focus): one request for all of them. With no timer pending the
+    // poll stopped while hidden and always resumes.
+    const onWake = () => {
+      if (document.hidden || done || running) return;
+      if (!timer || Date.now() - started > 1000) run();
     };
-    document.addEventListener('visibilitychange', onVisible);
+    const WAKE = ['online', 'pageshow', 'focus'];
+    document.addEventListener('visibilitychange', onWake);
+    WAKE.forEach((t) => window.addEventListener(t, onWake));
     runRef.current = () => {
       done = false;
       run();
@@ -72,7 +82,8 @@ export default function usePoll(fn, interval, deps = [], enabled = true) {
     return () => {
       stopped = true;
       clearTimeout(timer);
-      document.removeEventListener('visibilitychange', onVisible);
+      document.removeEventListener('visibilitychange', onWake);
+      WAKE.forEach((t) => window.removeEventListener(t, onWake));
       runRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

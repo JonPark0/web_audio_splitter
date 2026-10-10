@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ErrorBanner from '../../components/ErrorBanner';
 import TextButton from '../../components/TextButton';
+import { useDevice } from '../../device';
+import { MOD, isSelect, isTextEntry, shortcutKey } from '../../keys';
 import { navigate, useRoute } from '../../router';
 import { errorMessage, updateSample } from '../../samplesApi';
 import { exportAudio } from '../exportAudio';
@@ -15,7 +17,7 @@ import {
 } from '../project';
 import { createProject, deleteProject, getProject, listProjects } from '../projectsApi';
 import ClipInspector from './ClipInspector';
-import { useLayoutMode, useCoarsePointer, useFillHeight, usePref } from './layout';
+import { useBoxHeight, useFillHeight, useFitLevel, usePref } from './layout';
 import { useMeterClock } from './Meters';
 import { Menu, Sheet } from './Overlay';
 import ProjectPanel from './ProjectPanel';
@@ -24,6 +26,7 @@ import Timeline from './Timeline';
 import {
   BpmInput,
   ExportControl,
+  MasterFader,
   MasterSection,
   MoreButton,
   PlayButton,
@@ -48,12 +51,22 @@ import {
   snapStep,
   stepZoom,
 } from './snap';
-import useEngine, { engineCall, engineTry, useErrorReporter } from './useEngine';
+import useEngine, { engineCall, engineNow, engineTry, useErrorReporter } from './useEngine';
 import useProjectState, { clearDraft, readDraft, sameDocument } from './useProjectState';
 
 const LAST_PROJECT_KEY = 'arrange:lastProject';
 const CLIPBOARD_KEY = 'arrange:clipboard';
-const BOTTOM_BAR = 56;
+const BOTTOM_BAR = 56; // until the phone's bottom bar is measured (it adds the home-indicator inset)
+// Touch lanes stack 44 px controls: a tablet header needs its name over M/S,
+// a desktop one two control rows; the three lane sizes keep their steps.
+const COARSE_LANE_EXTRA = { tablet: 28, desktop: 50 };
+const COARSE_HEADER_EXTRA = 48; // desktop header on touch: the name beside 44 px M/S/menu
+// Toolbar items that move into More, first to last, while the row doesn't
+// fit (useFitLevel). The project picker shrinks before any of them goes.
+const FIT_ORDER = {
+  desktop: ['click', 'zoom', 'redo', 'fader', 'snap', 'undo', 'loop', 'position', 'bpm'],
+  tablet: ['undo', 'loop', 'position', 'bpm'],
+};
 
 function remember(id) {
   try {
@@ -83,20 +96,25 @@ function summarize(p) {
   };
 }
 
-// Shortcuts stay out of the way while the user types.
-function isTyping(target) {
-  if (!target || !(target instanceof HTMLElement)) return false;
-  return target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
+// Keys a focused control keeps for itself: a select's arrows / Space / Home,
+// and a slider's arrows when it was reached with Tab (a fader that was just
+// clicked lets the arrows nudge clips again).
+function ownsKey(target, e) {
+  const k = e.key || '';
+  const nav = k.startsWith('Arrow') || k === 'Home' || k === 'End';
+  if (isSelect(target)) return nav || e.code === 'Space' || k === ' ';
+  if (target instanceof HTMLInputElement && target.type === 'range' && nav) {
+    try {
+      return target.matches(':focus-visible');
+    } catch (err) {
+      return true;
+    }
+  }
+  return false;
 }
 
-// Narrower, for undo/redo: only fields with their own text undo keep the
-// shortcut (a focused slider or checkbox doesn't).
-const NON_TEXT_INPUTS = new Set(['range', 'checkbox', 'radio', 'button', 'submit', 'reset', 'color', 'file']);
-function isTextEntry(target) {
-  if (!target || !(target instanceof HTMLElement)) return false;
-  if (target.isContentEditable || target.tagName === 'TEXTAREA') return true;
-  return target.tagName === 'INPUT' && !NON_TEXT_INPUTS.has(target.type);
-}
+/** A shortcut hint: "Ctrl+C", or "⌘C" on Apple. */
+const hint = (key, shift) => (MOD === 'Ctrl' ? `Ctrl+${shift ? 'Shift+' : ''}${key}` : `${shift ? '⇧' : ''}${MOD}${key}`);
 
 function formatAgo(ms) {
   const s = Math.round((Date.now() - ms) / 1000);
@@ -105,7 +123,7 @@ function formatAgo(ms) {
   return new Date(ms).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 }
 
-const tap = '[@media(pointer:coarse)]:min-h-[44px] [@media(pointer:coarse)]:min-w-[44px] items-center justify-center';
+const tap = 'coarse:min-h-[44px] coarse:min-w-[44px] items-center justify-center';
 
 /**
  * Arrange: place library samples on tracks at one project tempo, play them
@@ -120,8 +138,7 @@ const tap = '[@media(pointer:coarse)]:min-h-[44px] [@media(pointer:coarse)]:min-
 export default function ArrangeScreen() {
   const route = useRoute();
   const routeId = route.segments[0] || null;
-  const mode = useLayoutMode();
-  const coarse = useCoarsePointer();
+  const { size: mode, coarse, short } = useDevice();
   const phone = mode === 'phone';
   const desktop = mode === 'desktop';
   const { error, report, clear } = useErrorReporter();
@@ -178,6 +195,9 @@ export default function ArrangeScreen() {
   const clipboardRef = useRef(null);
   const rootRef = useRef(null);
   const moreRef = useRef(null);
+  const samplesBtnRef = useRef(null);
+  const clipBtnRef = useRef(null);
+  const bottomBarRef = useRef(null);
   const projectRef = useRef(project);
   projectRef.current = project;
 
@@ -187,13 +207,16 @@ export default function ArrangeScreen() {
   }, []);
 
   const engine = useEngine({
-    onState: ({ playing: p, loading: l, pending: pend } = {}) => {
+    onState: ({ playing: p, loading: l, pending: pend, positionBeats, interrupted } = {}) => {
       if (typeof l === 'number') setLoading(l);
       if (Array.isArray(pend)) {
         setPending((prev) => (prev.size === pend.length && pend.every((id) => prev.has(id)) ? prev : new Set(pend)));
       }
       if (typeof p !== 'boolean') return;
-      if (playingRef.current && !p && !userStopRef.current) {
+      if (playingRef.current && !p && interrupted) {
+        // The system took the audio (call, Siri, lock): paused where it was heard.
+        if (Number.isFinite(positionBeats)) setCursorBeat(positionBeats);
+      } else if (playingRef.current && !p && !userStopRef.current) {
         // Reached the end on its own: return to where playback started.
         const start = playStartRef.current;
         setCursorBeat(start);
@@ -214,9 +237,23 @@ export default function ArrangeScreen() {
 
   const bpb = project?.beats_per_bar || 4;
   const step = snapStep(snap, bpb);
-  const lane = phone ? PHONE_LANE : laneHeight;
-  const headerWidth = HEADER_WIDTH[mode];
-  const fill = useFillHeight(rootRef, phone ? BOTTOM_BAR : 0, 260);
+  const laneExtra = coarse ? COARSE_LANE_EXTRA[mode] || 0 : 0;
+  const lane = phone ? PHONE_LANE : laneHeight + laneExtra;
+  const headerWidth = HEADER_WIDTH[mode] + (coarse && desktop ? COARSE_HEADER_EXTRA : 0);
+  // The phone's bottom bar is 56 px plus the home-indicator inset: measured,
+  // so the timeline's last row (+ Track) isn't hidden behind it.
+  const [bottomBarEl, bottomBar] = useBoxHeight(BOTTOM_BAR);
+  const setBottomBar = useCallback(
+    (el) => {
+      bottomBarRef.current = el;
+      bottomBarEl(el);
+    },
+    [bottomBarEl]
+  );
+  // A landscape phone has ~200 px under the bars: a smaller floor keeps the
+  // page itself from scrolling.
+  const fill = useFillHeight(rootRef, phone ? bottomBar : 0, short ? 120 : 260);
+  const [fitRef, fitLevel] = useFitLevel((FIT_ORDER[mode] || []).length, `${mode}|${coarse}`);
 
   // Every project change goes to the engine (cheap and idempotent by contract).
   useEffect(() => {
@@ -271,7 +308,8 @@ export default function ArrangeScreen() {
     userStopRef.current = false;
     playStartRef.current = cursorRef.current;
     try {
-      await engineCall(() => e.play(cursorRef.current));
+      // Now, not in a microtask: the audio has to start inside this tap.
+      await engineNow(() => e.play(cursorRef.current));
       let now = true;
       try {
         now = e.isPlaying();
@@ -789,7 +827,8 @@ export default function ArrangeScreen() {
     const onKey = (e) => {
       if (e.defaultPrevented) return;
       const k = keys.current;
-      const key = (e.key || '').toLowerCase();
+      // Letters by physical key when the layout isn't Latin (Hangul, Cyrillic).
+      const key = shortcutKey(e);
       const mod = e.ctrlKey || e.metaKey;
       // Undo/redo: Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z, Ctrl+Y. Text fields keep their own undo.
       if (mod && !e.altKey && (key === 'z' || (key === 'y' && e.ctrlKey))) {
@@ -799,7 +838,9 @@ export default function ArrangeScreen() {
         else k.undo();
         return;
       }
-      if (isTyping(e.target) || !k.project) return;
+      // Only text entry swallows shortcuts: after clicking a fader or the
+      // Snap select, Space / Delete / S still work.
+      if (isTextEntry(e.target) || ownsKey(e.target, e) || !k.project) return;
       const sel = k.liveSelection.length > 0;
       const handled = (() => {
         if (e.code === 'Space' || e.key === ' ') {
@@ -880,11 +921,33 @@ export default function ArrangeScreen() {
     <SaveIndicator status={saveStatus} error={saveError} retryAt={retryAt} onRetry={retryNow} compact={!desktop} />
   );
 
+  // Toolbar items handed to More as the row runs out of room (fitLevel).
+  const fitOrder = FIT_ORDER[mode] || [];
+  const moved = (name) => {
+    const rank = fitOrder.indexOf(name);
+    return rank >= 0 && rank < fitLevel;
+  };
+  const loopItem = project && { label: 'Loop', hint: 'L', checked: !!project.loop?.enabled, onSelect: toggleLoop };
+  const undoItem = { label: 'Undo', hint: hint('Z'), disabled: !canUndo, onSelect: undo };
+  const redoItem = { label: 'Redo', hint: hint('Z', true), disabled: !canRedo, onSelect: redo };
+  const bpmRow = project && { content: <BpmInput bpm={project.bpm} onCommit={setBpm} />, key: 'bpm' };
+  const snapRow = { content: <SnapSelect snap={snap} onSnapChange={setSnap} />, key: 'snap' };
+  const zoomRow = { content: <ZoomButtons zoom={zoom} onZoom={onZoom} onFit={zoomToFit} />, key: 'zoom' };
+  const movedItems = [
+    moved('bpm') && bpmRow,
+    moved('loop') && loopItem,
+    moved('undo') && undoItem,
+    moved('redo') && redoItem,
+    moved('snap') && snapRow,
+    moved('zoom') && zoomRow,
+    moved('fader') && { content: <MasterFader masterGain={masterGain} onMasterGain={setMasterGain} />, key: 'fader' },
+  ].filter(Boolean);
+
   const viewItems = project
     ? [
         ...LANE_HEIGHTS.map((h) => ({
           key: `lh${h}`,
-          label: `Lanes: ${h === 40 ? 'small' : h === 64 ? 'medium' : 'large'} (${h} px)`,
+          label: `Lanes: ${h === 40 ? 'small' : h === 64 ? 'medium' : 'large'} (${h + laneExtra} px)`,
           checked: laneHeight === h,
           onSelect: () => setLaneHeight(h),
         })),
@@ -899,19 +962,22 @@ export default function ArrangeScreen() {
   const editItems = project
     ? [
         { label: 'Split at playhead', hint: 'S', onSelect: splitAtPlayhead },
-        { label: 'Copy', hint: 'Ctrl+C', disabled: !liveSelection.length, onSelect: copySelected },
-        { label: 'Paste at playhead', hint: 'Ctrl+V', onSelect: paste },
-        { label: 'Select all', hint: 'Ctrl+A', onSelect: selectAll },
+        { label: 'Copy', hint: hint('C'), disabled: !liveSelection.length, onSelect: copySelected },
+        { label: 'Paste at playhead', hint: hint('V'), onSelect: paste },
+        { label: 'Select all', hint: hint('A'), onSelect: selectAll },
       ]
     : [];
+  const clickItem = { label: 'Click (metronome)', checked: metronome, onSelect: toggleMetronome };
   const moreItems = (
     desktop
-      ? [{ label: 'Click (metronome)', checked: metronome, onSelect: toggleMetronome }, { separator: true }, ...viewItems, { separator: true }, ...editItems]
+      ? [...movedItems, movedItems.length > 0 && { separator: true }, clickItem, { separator: true }, ...viewItems, { separator: true }, ...editItems]
       : [
-          { label: 'Redo', disabled: !canRedo, onSelect: redo },
-          { label: 'Click (metronome)', checked: metronome, onSelect: toggleMetronome },
-          { content: <SnapSelect snap={snap} onSnapChange={setSnap} />, key: 'snap' },
-          { content: <ZoomButtons zoom={zoom} onZoom={onZoom} onFit={zoomToFit} />, key: 'zoom' },
+          // the phone's bottom bar shows Clip instead of BPM while a clip is selected
+          ...(phone ? [liveSelection.length > 0 && bpmRow] : movedItems),
+          redoItem,
+          clickItem,
+          snapRow,
+          zoomRow,
           { separator: true },
           ...editItems,
           { separator: true },
@@ -919,10 +985,17 @@ export default function ArrangeScreen() {
         ]
   ).filter(Boolean);
 
+  // Phone sheets sit on top of the bottom bar, which stays usable under them.
+  const sheetAbove = phone ? { bottom: bottomBar, ignoreRef: bottomBarRef } : {};
+
   const selectedTrack = sheet?.startsWith('track:') ? project?.tracks.find((t) => `track:${t.id}` === sheet) : null;
 
+  // Keyed by the selection: a tap on another clip re-renders before the
+  // focused field blurs (touch), so a typed value would land on the new clip.
+  // Remounting commits it to the clip it was typed for (CommitField unmount).
   const inspector = project && liveSelection.length > 0 && (
     <ClipInspector
+      key={liveSelection.join(' ')}
       project={project}
       selection={liveSelection}
       pending={pending}
@@ -951,71 +1024,85 @@ export default function ArrangeScreen() {
   );
 
   // ---- toolbar (tablet/desktop) or project row (phone) ----
+  const toggleSheet = (name) => setSheet((s) => (s === name ? null : name));
+  // In a span: TextButton takes no ref, and the sheet must ignore its own
+  // toggle's pointer-down (or the tap that should close it reopens it).
+  const samplesButton = (
+    <span ref={samplesBtnRef} className="flex">
+      <TextButton
+        muted
+        current={desktop ? browserOpen : sheet === 'samples'}
+        aria-pressed={desktop ? browserOpen : sheet === 'samples'}
+        onClick={() => (desktop ? setBrowserOpen((o) => !o) : toggleSheet('samples'))}
+        title={desktop ? 'Show or hide the sample browser' : 'Samples'}
+        className={tap}
+      >
+        Samples
+      </TextButton>
+    </span>
+  );
+  const clipButton = (muted) => (
+    <span ref={clipBtnRef} className="flex">
+      <TextButton muted={muted} current={sheet === 'clip'} aria-expanded={sheet === 'clip'} onClick={() => toggleSheet('clip')} className={tap}>
+        Clip
+      </TextButton>
+    </span>
+  );
+
   const toolbar = phone ? (
     <div className="sticky top-12 z-20 flex h-10 items-center gap-3 border-b border-line bg-paper">
       <ProjectPicker {...pickerProps} className="min-w-0 flex-1" />
       {saveIndicator}
-      {project && (
-        <TextButton muted current={sheet === 'samples'} onClick={() => setSheet((s) => (s === 'samples' ? null : 'samples'))} className={tap}>
-          Samples
-        </TextButton>
-      )}
+      {project && samplesButton}
       {project && (
         <ExportControl project={project} exporting={exporting} progress={exportProgress} disabled={busy} onExport={doExport} />
       )}
     </div>
   ) : (
-    <div className="sticky top-12 z-20 flex h-11 items-center gap-x-2.5 border-b border-line bg-paper lg:gap-x-4 xl:gap-x-5">
-      <ProjectPicker {...pickerProps} className={desktop ? 'max-w-[200px]' : 'w-[112px] shrink-0'} />
+    <div ref={fitRef} className="sticky top-12 z-20 flex h-11 items-center gap-x-2.5 border-b border-line bg-paper lg:gap-x-4 xl:gap-x-5">
+      <ProjectPicker {...pickerProps} className={desktop ? 'min-w-[7.5rem] max-w-[200px]' : 'min-w-[4.5rem] max-w-[160px]'} />
       {desktop && saveIndicator}
       {project && (
         <>
           <span className="flex items-center gap-2">
             <PlayButton playing={playing} onToggle={togglePlay} />
-            <PositionReadout clock={clock} beatsPerBar={bpb} className="w-[4.5rem] text-h4" />
+            {!moved('position') && <PositionReadout clock={clock} beatsPerBar={bpb} className="w-[4.5rem] text-h4" />}
           </span>
-          <BpmInput bpm={project.bpm} onCommit={setBpm} showLabel={desktop} />
-          <TextButton muted current={!!project.loop?.enabled} aria-pressed={!!project.loop?.enabled} onClick={toggleLoop} title="Loop (L)" className={tap}>
-            Loop
-          </TextButton>
-          {desktop && (
-            <TextButton muted current={metronome} aria-pressed={metronome} onClick={toggleMetronome} title="Metronome" className="hidden xl:inline-flex">
+          {!moved('bpm') && <BpmInput bpm={project.bpm} onCommit={setBpm} showLabel={desktop && !moved('click')} />}
+          {!moved('loop') && (
+            <TextButton muted current={!!project.loop?.enabled} aria-pressed={!!project.loop?.enabled} onClick={toggleLoop} title="Loop (L)" className={tap}>
+              Loop
+            </TextButton>
+          )}
+          {desktop && !moved('click') && (
+            <TextButton muted current={metronome} aria-pressed={metronome} onClick={toggleMetronome} title="Metronome" className={tap}>
               Click
             </TextButton>
           )}
-          {desktop && <SnapSelect snap={snap} onSnapChange={setSnap} />}
-          {desktop && <ZoomButtons zoom={zoom} onZoom={onZoom} onFit={zoomToFit} />}
-          <span className="flex items-center gap-3">
-            <TextButton muted onClick={undo} disabled={!canUndo} title="Undo (Ctrl/Cmd+Z)" className={tap}>
-              Undo
-            </TextButton>
-            {desktop && (
-              <TextButton muted onClick={redo} disabled={!canRedo} title="Redo (Ctrl/Cmd+Shift+Z)" className={tap}>
-                Redo
-              </TextButton>
-            )}
-          </span>
+          {desktop && !moved('snap') && <SnapSelect snap={snap} onSnapChange={setSnap} />}
+          {desktop && !moved('zoom') && <ZoomButtons zoom={zoom} onZoom={onZoom} onFit={zoomToFit} />}
+          {!(moved('undo') && (!desktop || moved('redo'))) && (
+            <span className="flex items-center gap-3">
+              {!moved('undo') && (
+                <TextButton muted onClick={undo} disabled={!canUndo} title={`Undo (${hint('Z')})`} className={tap}>
+                  Undo
+                </TextButton>
+              )}
+              {desktop && !moved('redo') && (
+                <TextButton muted onClick={redo} disabled={!canRedo} title={`Redo (${hint('Z', true)})`} className={tap}>
+                  Redo
+                </TextButton>
+              )}
+            </span>
+          )}
           {loading > 0 && desktop && <span className="hidden text-caption text-muted 2xl:inline">Loading audio…</span>}
           <span className="ml-auto flex items-center gap-x-2.5 lg:gap-x-4">
             {!desktop && !['saved', 'idle'].includes(saveStatus) && saveIndicator}
             <ExportControl project={project} exporting={exporting} progress={exportProgress} disabled={busy} onExport={doExport} />
-            {desktop && <MasterSection meterClock={meterClock} masterGain={masterGain} onMasterGain={setMasterGain} showFader />}
-            {!desktop && liveSelection.length > 0 && (
-              <TextButton muted current={sheet === 'clip'} onClick={() => setSheet((s) => (s === 'clip' ? null : 'clip'))} className={tap}>
-                Clip
-              </TextButton>
-            )}
-            <TextButton
-              muted
-              current={desktop ? browserOpen : sheet === 'samples'}
-              aria-pressed={desktop ? browserOpen : sheet === 'samples'}
-              onClick={() => (desktop ? setBrowserOpen((o) => !o) : setSheet((s) => (s === 'samples' ? null : 'samples')))}
-              title={desktop ? 'Show or hide the sample browser' : 'Samples'}
-              className={tap}
-            >
-              Samples
-            </TextButton>
-            <MoreButton open={sheet === 'more'} onToggle={() => setSheet((s) => (s === 'more' ? null : 'more'))} anchorRef={moreRef} />
+            {desktop && <MasterSection meterClock={meterClock} masterGain={masterGain} onMasterGain={setMasterGain} showFader={!moved('fader')} />}
+            {!desktop && liveSelection.length > 0 && clipButton(true)}
+            {samplesButton}
+            <MoreButton open={sheet === 'more'} onToggle={() => toggleSheet('more')} anchorRef={moreRef} />
             <Menu open={sheet === 'more'} onClose={() => setSheet(null)} items={moreItems} anchorRef={moreRef} title="More" />
           </span>
         </>
@@ -1070,7 +1157,9 @@ export default function ArrangeScreen() {
       )}
       {armedSample && (
         <div role="status" className="flex items-baseline gap-4 border-b border-line py-1">
-          <span className="min-w-0 truncate">Tap a lane to place “{armedSample.name}”.</span>
+          <span className="min-w-0 truncate">
+            {coarse ? 'Tap' : 'Click'} a lane to place “{armedSample.name}”.
+          </span>
           <TextButton muted onClick={() => setArmedSample(null)} className={tap}>
             Cancel
           </TextButton>
@@ -1138,8 +1227,12 @@ export default function ArrangeScreen() {
               onViewWidth={setViewWidth}
             />
           </div>
+          {/* Fixed with a mouse; on touch (44 px rows) as tall as its content,
+              up to 40% of the screen, scrolling beyond that. */}
           {desktop && (
-            <div className="h-[124px] shrink-0 overflow-y-auto border-t border-line pt-1.5">{inspector || projectPanel}</div>
+            <div className="h-[124px] shrink-0 overflow-y-auto overscroll-contain border-t border-line pt-1.5 coarse:h-auto coarse:max-h-[40%] coarse:min-h-[124px]">
+              {inspector || projectPanel}
+            </div>
           )}
         </div>
         {desktop && browserOpen && (
@@ -1163,30 +1256,35 @@ export default function ArrangeScreen() {
       {banners}
       {body}
 
-      {/* Phone: fixed bottom transport (one bottom bar per screen). */}
+      {/* Phone: fixed bottom transport (one bottom bar per screen). Sheets
+          open above it, so Play stays in reach while editing a clip. */}
       {phone && project && (
-        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-paper pb-[env(safe-area-inset-bottom)]">
+        <div ref={setBottomBar} className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-paper pb-[env(safe-area-inset-bottom)] pl-safe-inset pr-safe-inset">
           <div className="flex h-14 items-center justify-between gap-1 px-2">
             <PlayButton playing={playing} onToggle={togglePlay} big />
             <PositionReadout clock={clock} beatsPerBar={bpb} className="w-[4.25rem] text-h4" />
-            {liveSelection.length > 0 ? (
-              <TextButton current={sheet === 'clip'} onClick={() => setSheet((s) => (s === 'clip' ? null : 'clip'))} className={tap}>
-                Clip
-              </TextButton>
-            ) : (
-              <BpmInput bpm={project.bpm} onCommit={setBpm} />
-            )}
+            {liveSelection.length > 0 ? clipButton(false) : <BpmInput bpm={project.bpm} onCommit={setBpm} />}
             <TextButton muted current={!!project.loop?.enabled} aria-pressed={!!project.loop?.enabled} onClick={toggleLoop} className={tap}>
               Loop
             </TextButton>
             <TextButton muted onClick={undo} disabled={!canUndo} className={tap}>
               Undo
             </TextButton>
-            <MoreButton open={sheet === 'more'} onToggle={() => setSheet((s) => (s === 'more' ? null : 'more'))} anchorRef={moreRef} />
+            <MoreButton open={sheet === 'more'} onToggle={() => toggleSheet('more')} anchorRef={moreRef} />
           </div>
         </div>
       )}
-      {phone && <Menu open={sheet === 'more'} onClose={() => setSheet(null)} items={moreItems} anchorRef={moreRef} asSheet title="More" />}
+      {phone && (
+        <Menu
+          open={sheet === 'more'}
+          onClose={() => setSheet(null)}
+          items={moreItems}
+          anchorRef={moreRef}
+          asSheet
+          title="More"
+          sheetProps={{ bottom: bottomBar, ignoreRef: bottomBarRef }}
+        />
+      )}
 
       {/* Tablet/phone panels */}
       {!desktop && project && (
@@ -1198,16 +1296,25 @@ export default function ArrangeScreen() {
             onClose={() => setSheet(null)}
             bodyClassName="flex flex-col px-4 py-2"
             maxHeight="75dvh"
+            fill
+            {...sheetAbove}
+            ignoreRef={[samplesBtnRef, bottomBarRef]}
           >
-            <SampleBrowser onAdd={addAtPlayhead} onArm={armSample} onError={report} coarse={coarse} className={phone ? 'h-[60dvh]' : 'h-full'} />
+            <SampleBrowser onAdd={addAtPlayhead} onArm={armSample} onError={report} coarse={coarse} className="min-h-0 flex-1" />
           </Sheet>
-          <Sheet open={sheet === 'clip' && liveSelection.length > 0} title={liveSelection.length > 1 ? `${liveSelection.length} clips` : 'Clip'} onClose={() => setSheet(null)}>
+          <Sheet
+            open={sheet === 'clip' && liveSelection.length > 0}
+            title={liveSelection.length > 1 ? `${liveSelection.length} clips` : 'Clip'}
+            onClose={() => setSheet(null)}
+            {...sheetAbove}
+            ignoreRef={[clipBtnRef, bottomBarRef]}
+          >
             {inspector}
           </Sheet>
-          <Sheet open={sheet === 'project'} title="Project" onClose={() => setSheet(null)}>
+          <Sheet open={sheet === 'project'} title="Project" onClose={() => setSheet(null)} {...sheetAbove}>
             {projectPanel}
           </Sheet>
-          <Sheet open={!!selectedTrack} title={selectedTrack?.name || 'Track'} onClose={() => setSheet(null)}>
+          <Sheet open={!!selectedTrack} title={selectedTrack?.name || 'Track'} onClose={() => setSheet(null)} {...sheetAbove}>
             {selectedTrack && (
               <TrackSheet
                 track={selectedTrack}
@@ -1234,7 +1341,7 @@ export default function ArrangeScreen() {
 function TrackSheet({ track, index, count, onUpdate, onMove, onDelete }) {
   const [asking, setAsking] = useState(false);
   const set = (patch, coalesce) => onUpdate(track.id, patch, coalesce);
-  const btn = '[@media(pointer:coarse)]:min-h-[44px] justify-center';
+  const btn = 'coarse:min-h-[44px] justify-center';
   return (
     <div className="flex flex-col gap-3 px-4 py-3">
       <InlineName value={track.name} label="Track name" onCommit={(name) => set({ name })} className="text-h4" inputClassName="w-full text-p" />
