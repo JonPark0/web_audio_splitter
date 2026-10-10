@@ -1,0 +1,14 @@
+{
+  "name": "audio-splitter-e2e",
+  "private": true,
+  "type": "module",
+  "description": "Browser UI tests (Playwright) against the real backend, on desktop, tablet and phone profiles. See README.md.",
+  "scripts": {
+    "test": "playwright test",
+    "test:chromium": "E2E_BROWSERS=chromium playwright test",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1"
+  }
+}

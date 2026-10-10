@@ -1,0 +1,33 @@
+#!/bin/sh
+# Test stand-in for the Demucs CLI (UI tests don't need, and CI can't fetch,
+# the model weights): `demucs -n MODEL --out DIR FILE` writes
+# DIR/MODEL/<file stem>/<stem>.wav, each stem a differently filtered copy of
+# the input, so peaks, playback, sample cutting and analysis all run on real
+# audio. Controlled per backend from files in its working directory:
+#   fake-sep-delay   seconds to wait first (default 2), to watch progress or
+#                    cancel a running job
+#   fake-sep-fail    present: fail like a crashed separation
+model=htdemucs; out=separated; file=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -n) model=$2; shift 2;;
+    --out) out=$2; shift 2;;
+    --shifts) shift 2;;
+    *) file=$1; shift;;
+  esac
+done
+delay=$(cat fake-sep-delay 2>/dev/null || echo 2)
+sleep "$delay"
+if [ -f fake-sep-fail ]; then
+  echo "RuntimeError: separation failed (fake-sep-fail)" >&2
+  exit 1
+fi
+base=$(basename "$file"); stem=${base%.*}
+dest="$out/$model/$stem"; mkdir -p "$dest"
+stems="vocals:bandpass=f=1200:width_type=h:w=1600 drums:highpass=f=3000 bass:lowpass=f=180 other:bandpass=f=600:width_type=h:w=800"
+[ "$model" = htdemucs_6s ] && stems="$stems guitar:bandpass=f=900:width_type=h:w=400 piano:bandpass=f=2000:width_type=h:w=600"
+for s in $stems; do
+  name=${s%%:*}; af=${s#*:}
+  ffmpeg -nostdin -y -loglevel error -i "$file" -vn -ac 2 -ar 44100 -af "$af" -c:a pcm_s16le "$dest/$name.wav" || exit 1
+done
+echo "Separated tracks will be stored in $dest" >&2
