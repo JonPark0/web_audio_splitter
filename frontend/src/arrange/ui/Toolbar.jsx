@@ -7,7 +7,7 @@ import { Menu, useDismiss } from './Overlay';
 import { useClockListener } from './playheadClock';
 import { MAX_ZOOM, MIN_DB, MIN_ZOOM, SNAP_OPTIONS, dbToGain, formatDb, formatPosition, gainToDb } from './snap';
 
-const tap = '[@media(pointer:coarse)]:min-h-[44px] [@media(pointer:coarse)]:min-w-[44px] items-center justify-center';
+const tap = 'coarse:min-h-[44px] coarse:min-w-[44px] items-center justify-center';
 const icon = (C) => <C className="icon" strokeWidth={1.5} aria-hidden="true" />;
 
 /** bars.beats.16ths readout, written straight to the DOM from the clock. */
@@ -75,7 +75,7 @@ export function BpmInput({ bpm, onCommit, className = '', showLabel = true }) {
           }
         }}
         aria-label="Project BPM"
-        className="ainput w-[3.25rem] !pb-0.5 tabular-nums [@media(pointer:coarse)]:min-h-[44px] [@media(pointer:coarse)]:text-p"
+        className="ainput w-[3.25rem] !pb-0.5 tabular-nums coarse:min-h-[44px] coarse:text-p"
       />
       {showLabel && <span className="text-caption text-muted">BPM</span>}
     </label>
@@ -148,7 +148,7 @@ export function ProjectPicker({ projects, project, busy, onOpen, onCreate, onRen
           if (e.key === 'Enter') finish(true);
           if (e.key === 'Escape') finish(false);
         }}
-        className={`ainput !pb-0.5 [@media(pointer:coarse)]:min-h-[44px] [@media(pointer:coarse)]:text-p ${className}`}
+        className={`ainput !pb-0.5 coarse:min-h-[44px] coarse:text-p ${className}`}
       />
     );
   }
@@ -203,7 +203,7 @@ export function ProjectPicker({ projects, project, busy, onOpen, onCreate, onRen
         aria-expanded={open}
         aria-haspopup="menu"
         title="Projects"
-        className="weight-hover flex min-h-[28px] min-w-0 items-center gap-1 border-0 bg-transparent p-0 text-left text-ink [@media(pointer:coarse)]:min-h-[44px]"
+        className="weight-hover flex min-h-[28px] min-w-0 items-center gap-1 border-0 bg-transparent p-0 text-left text-ink coarse:min-h-[44px]"
       >
         <span className="truncate">{project ? project.name : 'No project'}</span>
         <FiChevronDown className="icon shrink-0" strokeWidth={1.5} aria-hidden="true" />
@@ -300,7 +300,7 @@ export function MasterSection({ meterClock, masterGain, onMasterGain, showFader 
             onDoubleClick={() => onMasterGain(1)}
             aria-label="Master volume"
             aria-valuetext={formatDb(masterGain)}
-            className="slider w-16 [@media(pointer:coarse)]:h-11"
+            className="slider w-16 coarse:h-11"
           />
           <span className="w-[52px] text-right tabular-nums">{formatDb(masterGain)}</span>
         </label>
@@ -339,7 +339,7 @@ export function SnapSelect({ snap, onSnapChange }) {
   return (
     <label className="flex items-baseline gap-1.5">
       <span className="text-caption text-muted">Snap</span>
-      <select value={snap} onChange={(e) => onSnapChange(e.target.value)} className="ainput w-[4.5rem] !pb-0.5 text-caption [@media(pointer:coarse)]:min-h-[44px] [@media(pointer:coarse)]:text-p" aria-label="Snap">
+      <select value={snap} onChange={(e) => onSnapChange(e.target.value)} className="ainput w-[4.5rem] !pb-0.5 text-caption coarse:min-h-[44px] coarse:text-p" aria-label="Snap">
         {SNAP_OPTIONS.map((o) => (
           <option key={o.value} value={o.value}>
             {o.label}

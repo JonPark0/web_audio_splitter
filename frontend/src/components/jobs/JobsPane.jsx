@@ -203,7 +203,7 @@ export default function JobsPane({ className = '', currentId = null }) {
   const filtered = !!q || filter !== 'all';
 
   return (
-    <section ref={rootRef} aria-labelledby="jobs-heading" className={`min-w-0 [--acts:8.25rem] [@media(pointer:coarse)]:[--acts:10.75rem] ${className}`}>
+    <section ref={rootRef} aria-labelledby="jobs-heading" className={`min-w-0 [--acts:8.25rem] coarse:[--acts:10.75rem] ${className}`}>
       {/* toolbar sticks under the 48px header */}
       <div className="sticky top-12 z-20 border-b border-line bg-paper pb-1 pt-2">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 sm:gap-x-5">

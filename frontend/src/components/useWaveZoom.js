@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useDevice } from '../device';
 
 /**
  * One shared timeline for every waveform on the result screen (stems, ruler,
@@ -151,29 +152,11 @@ export function useViewFrame(timeline, fn, deps = []) {
   }, [timeline, ...deps]);
 }
 
-/** Breakpoints of the layout contract: phone < 640, tablet < 1024, desktop. */
+/**
+ * Layout size and touch for the result screen (see src/device.js): a
+ * landscape phone is a phone, an iPad in landscape a tablet.
+ */
 export function useLayoutSize() {
-  const get = () => {
-    if (typeof window === 'undefined') return { size: 'desktop', coarse: false };
-    const w = window.innerWidth;
-    return {
-      size: w >= 1024 ? 'desktop' : w >= 640 ? 'tablet' : 'phone',
-      coarse: window.matchMedia('(pointer: coarse)').matches,
-    };
-  };
-  const [state, setState] = useState(get);
-  useEffect(() => {
-    const onChange = () => {
-      const next = get();
-      setState((s) => (s.size === next.size && s.coarse === next.coarse ? s : next));
-    };
-    window.addEventListener('resize', onChange);
-    const mq = window.matchMedia('(pointer: coarse)');
-    mq.addEventListener?.('change', onChange);
-    return () => {
-      window.removeEventListener('resize', onChange);
-      mq.removeEventListener?.('change', onChange);
-    };
-  }, []);
-  return state;
+  const { size, coarse, short } = useDevice();
+  return { size, coarse, short };
 }

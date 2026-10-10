@@ -68,7 +68,7 @@ export function CommitField({
         }
       }}
       aria-label={label}
-      className={`ainput !pb-0.5 tabular-nums [@media(pointer:coarse)]:min-h-[44px] [@media(pointer:coarse)]:text-p ${className}`}
+      className={`ainput !pb-0.5 tabular-nums coarse:min-h-[44px] coarse:text-p ${className}`}
     />
   );
 }
@@ -78,7 +78,7 @@ export function Group({ label, children, className = '', title }) {
   return (
     <div className={`flex min-w-0 flex-col ${className}`} title={title}>
       <span className="truncate text-caption leading-tight text-muted">{label}</span>
-      <div className="flex min-h-[28px] min-w-0 items-center gap-x-2 [@media(pointer:coarse)]:min-h-[44px]">{children}</div>
+      <div className="flex min-h-[28px] min-w-0 items-center gap-x-2 coarse:min-h-[44px]">{children}</div>
     </div>
   );
 }

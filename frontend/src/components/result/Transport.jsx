@@ -46,7 +46,7 @@ function IconButton({ onClick, label, children, disabled, big }) {
       disabled={disabled}
       aria-label={label}
       title={label}
-      className={`link rs-hit items-center justify-center ${big ? 'h-11 w-11' : '[@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:min-w-11'}`}
+      className={`link rs-hit items-center justify-center ${big ? 'h-11 w-11' : 'coarse:h-11 coarse:min-w-11'}`}
     >
       {children}
     </button>

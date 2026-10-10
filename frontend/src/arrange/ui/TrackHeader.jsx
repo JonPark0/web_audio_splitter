@@ -18,7 +18,7 @@ function MuteSolo({ track, set, big, className = '' }) {
   // those plus the name don't fit the phone's 72 px column / 56 px lane.
   const cls = big
     ? 'h-[38px] !min-h-[38px] !min-w-[34px] items-center justify-center sm:h-auto sm:!min-h-[44px] sm:!min-w-[44px]'
-    : 'min-w-[16px] [@media(pointer:coarse)]:min-h-[44px] [@media(pointer:coarse)]:min-w-[32px]';
+    : 'min-w-[16px] coarse:min-h-[44px] coarse:min-w-[32px]';
   return (
     <div className={`flex shrink-0 items-center ${big ? 'gap-0' : 'gap-2'} text-caption ${className}`}>
       <TextButton
@@ -61,7 +61,7 @@ export function VolumeSlider({ track, set, showValue = true, className = '' }) {
         value={gainToDb(track.volume)}
         onChange={(e) => set({ volume: Math.min(2, Math.round(dbToGain(parseFloat(e.target.value)) * 10000) / 10000) }, `volume:${track.id}`)}
         onDoubleClick={() => set({ volume: 1 })}
-        className="slider min-w-0 flex-1 [@media(pointer:coarse)]:h-11"
+        className="slider min-w-0 flex-1 coarse:h-11"
         aria-label={`${track.name} volume`}
         aria-valuetext={formatDb(track.volume)}
       />
@@ -81,7 +81,7 @@ export function PanSlider({ track, set, className = '' }) {
         value={track.pan}
         onChange={(e) => set({ pan: parseFloat(e.target.value) }, `pan:${track.id}`)}
         onDoubleClick={() => set({ pan: 0 })}
-        className="slider min-w-0 flex-1 [@media(pointer:coarse)]:h-11"
+        className="slider min-w-0 flex-1 coarse:h-11"
         aria-label={`${track.name} pan`}
       />
       <span className="w-7 shrink-0 text-right tabular-nums text-ink">{formatPan(track.pan)}</span>

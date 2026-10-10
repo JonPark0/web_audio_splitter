@@ -73,7 +73,7 @@ export default function App() {
         Skip to content
       </button>
       <Header route={route} />
-      <main id="main" tabIndex={-1} className="mx-auto w-full max-w-[1920px] px-4 outline-none sm:px-6 lg:px-8">
+      <main id="main" tabIndex={-1} className="px-safe mx-auto w-full max-w-[1920px] outline-none">
         <ErrorBoundary resetKey={route.path}>
           <Suspense fallback={<Loading />}>
             <Screen route={route} />

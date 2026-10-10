@@ -65,7 +65,7 @@ export function BottomSheet({ title, onClose, children, label }) {
  */
 export function ActionList({ items, onDone, dense = false }) {
   const row = `flex w-full items-center justify-between gap-4 border-0 bg-transparent text-left text-ink hover:bg-wash focus-visible:bg-wash disabled:text-muted disabled:hover:bg-transparent ${
-    dense ? 'min-h-8 px-3 text-p [@media(pointer:coarse)]:min-h-11' : 'min-h-11 px-4 sm:px-6'
+    dense ? 'min-h-8 px-3 text-p coarse:min-h-11' : 'min-h-11 px-4 sm:px-6'
   }`;
   return (
     <ul className="m-0 list-none p-0" role="menu">

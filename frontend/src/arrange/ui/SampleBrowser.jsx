@@ -89,7 +89,7 @@ const SampleItem = memo(function SampleItem({ sample, playing, coarse, onToggleP
         aria-pressed={playing}
         title={playing ? 'Stop preview' : 'Preview'}
         current={playing}
-        className="min-h-[32px] min-w-[28px] shrink-0 items-center justify-center [@media(pointer:coarse)]:min-h-[44px] [@media(pointer:coarse)]:min-w-[44px]"
+        className="min-h-[32px] min-w-[28px] shrink-0 items-center justify-center coarse:min-h-[44px] coarse:min-w-[44px]"
       >
         {playing ? <FiSquare className="icon" strokeWidth={1.5} aria-hidden="true" /> : <FiPlay className="icon" strokeWidth={1.5} aria-hidden="true" />}
       </TextButton>
@@ -113,7 +113,7 @@ const SampleItem = memo(function SampleItem({ sample, playing, coarse, onToggleP
         muted
         onClick={() => onAdd(sample)}
         title="Add at the playhead on the selected track"
-        className="shrink-0 pr-1 text-caption [@media(pointer:coarse)]:min-h-[44px] [@media(pointer:coarse)]:min-w-[44px] justify-center"
+        className="shrink-0 pr-1 text-caption coarse:min-h-[44px] coarse:min-w-[44px] justify-center"
       >
         Add
       </TextButton>
@@ -176,7 +176,7 @@ export default function SampleBrowser({ onAdd, onArm, onError, coarse, className
           onKeyDown={(e) => e.stopPropagation()}
           placeholder="Search samples"
           aria-label="Search samples"
-          className="ainput !pb-1 [@media(pointer:coarse)]:min-h-[44px] [@media(pointer:coarse)]:text-p"
+          className="ainput !pb-1 coarse:min-h-[44px] coarse:text-p"
         />
         <span className="shrink-0 text-caption tabular-nums text-muted">{status === 'ready' ? samples.length : ''}</span>
       </div>

@@ -1,39 +1,15 @@
 import { useEffect, useLayoutEffect, useState } from 'react';
+import { useDevice } from '../../device';
 
-// Breakpoints of the phase-2 layout contract: phone < 640, tablet 640-1023,
-// desktop >= 1024 (Tailwind sm / lg).
-const QUERIES = { desktop: '(min-width: 1024px)', tablet: '(min-width: 640px)' };
-
-function currentMode() {
-  if (typeof window === 'undefined' || !window.matchMedia) return 'desktop';
-  if (window.matchMedia(QUERIES.desktop).matches) return 'desktop';
-  if (window.matchMedia(QUERIES.tablet).matches) return 'tablet';
-  return 'phone';
-}
-
-/** 'phone' | 'tablet' | 'desktop', live. */
+/** 'phone' | 'tablet' | 'desktop', live (src/device.js: a landscape phone is
+ * a phone; touch needs >= 1366 px for the desktop chrome). */
 export function useLayoutMode() {
-  const [mode, setMode] = useState(currentMode);
-  useEffect(() => {
-    const lists = Object.values(QUERIES).map((q) => window.matchMedia(q));
-    const on = () => setMode(currentMode());
-    lists.forEach((l) => l.addEventListener('change', on));
-    return () => lists.forEach((l) => l.removeEventListener('change', on));
-  }, []);
-  return mode;
+  return useDevice().size;
 }
 
-/** True on touch-first devices ((pointer: coarse)). */
+/** True when any touch input is present ((any-pointer: coarse)). */
 export function useCoarsePointer() {
-  const q = '(pointer: coarse)';
-  const [coarse, setCoarse] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.(q).matches);
-  useEffect(() => {
-    const l = window.matchMedia(q);
-    const on = () => setCoarse(l.matches);
-    l.addEventListener('change', on);
-    return () => l.removeEventListener('change', on);
-  }, []);
-  return coarse;
+  return useDevice().coarse;
 }
 
 /**

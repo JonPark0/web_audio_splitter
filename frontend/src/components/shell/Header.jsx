@@ -25,7 +25,7 @@ export default function Header({ route }) {
   const inFlight = useInFlight();
   return (
     <header className="sticky top-0 z-30 h-12 border-b border-line bg-paper">
-      <div className="mx-auto flex h-full w-full max-w-[1920px] items-center gap-4 px-4 sm:gap-6 sm:px-6 lg:px-8">
+      <div className="px-safe mx-auto flex h-full w-full max-w-[1920px] items-center gap-4 sm:gap-6">
         <a
           href={href('/split')}
           className={`flex h-full min-w-0 items-center truncate whitespace-nowrap font-brand text-p uppercase leading-none tracking-logo sm:text-h4 ${

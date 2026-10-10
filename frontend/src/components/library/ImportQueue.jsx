@@ -159,7 +159,7 @@ export function ImportPanel({ queue, allTags }) {
       </div>
       <ul className="m-0 mt-1 list-none p-0">
         {items.map((it) => (
-          <li key={it.id} className="flex min-h-8 items-center gap-3 text-caption [@media(pointer:coarse)]:min-h-11">
+          <li key={it.id} className="flex min-h-8 items-center gap-3 text-caption coarse:min-h-11">
             {it.status === 'queued' ? (
               <input
                 type="text"
@@ -195,7 +195,7 @@ export function ImportPanel({ queue, allTags }) {
                 <FiX className="icon" strokeWidth={1.5} aria-hidden="true" />
               </button>
             ) : (
-              <span className="h-6 w-6 shrink-0 [@media(pointer:coarse)]:w-11" />
+              <span className="h-6 w-6 shrink-0 coarse:w-11" />
             )}
           </li>
         ))}

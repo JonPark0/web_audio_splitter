@@ -70,7 +70,7 @@ export default function NameEditor({ sample, busy, onPatch, editing: editingProp
       disabled={busy}
       onClick={() => setEditing(true)}
       title="Rename"
-      className={`weight-hover block w-full min-w-0 cursor-text truncate border-0 bg-transparent p-0 text-left leading-tight text-ink disabled:cursor-default [@media(pointer:coarse)]:min-h-11 ${size}`}
+      className={`weight-hover block w-full min-w-0 cursor-text truncate border-0 bg-transparent p-0 text-left leading-tight text-ink disabled:cursor-default coarse:min-h-11 ${size}`}
     >
       {sample.name}
     </button>

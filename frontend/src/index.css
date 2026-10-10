@@ -60,6 +60,26 @@
     -webkit-text-size-adjust: 100%;
     /* reserve the scrollbar gutter so screens don't shift between steps */
     scrollbar-gutter: stable;
+    /* keyboard focus and scrollIntoView stop below the sticky 48 px header */
+    scroll-padding-top: 3.5rem;
+    /* no grey flash over whole rows on tap; :active / focus give feedback */
+    -webkit-tap-highlight-color: transparent;
+  }
+  /* No double-tap-to-zoom on controls: fast taps (tap tempo, +/- steppers,
+     nudges) stay taps on iOS. Pinch zoom of the page is untouched. */
+  a,
+  button,
+  input,
+  select,
+  textarea,
+  label,
+  summary,
+  [role='button'],
+  [role='slider'],
+  [role='option'],
+  [role='menuitem'],
+  [role='checkbox'] {
+    touch-action: manipulation;
   }
   body {
     @apply bg-paper font-sans text-p text-ink antialiased;
@@ -112,11 +132,18 @@
     font-weight: var(--w-hover);
     font-variation-settings: 'wght' var(--w-hover);
   }
-  .link:hover,
   .link:focus-visible,
   .link.is-current {
     --_w: var(--w-hover);
     font-weight: var(--w-hover); /* picks Pretendard Regular for Hangul */
+  }
+  /* Hover only where hovering exists: on touch, :hover sticks to the last
+     tapped control (a toggled-off button kept looking current). */
+  @media (hover: hover) {
+    .link:hover {
+      --_w: var(--w-hover);
+      font-weight: var(--w-hover);
+    }
   }
   .link:active {
     transform: translateY(1.5px) scale(0.985);
@@ -133,9 +160,13 @@
     text-decoration-thickness: 1px;
   }
   @supports not (font-variation-settings: 'wght' 400) {
-    .link:hover,
     .link:focus-visible {
       text-shadow: 0.02em 0 currentColor, -0.02em 0 currentColor;
+    }
+    @media (hover: hover) {
+      .link:hover {
+        text-shadow: 0.02em 0 currentColor, -0.02em 0 currentColor;
+      }
     }
   }
   /* App-only: Palnarium has no disabled link. Unavailable reads as muted
@@ -163,10 +194,15 @@
     font-variation-settings: 'wght' var(--w);
     transition: font-variation-settings 140ms ease;
   }
-  .weight-hover:hover:not(:disabled),
   .weight-hover:focus-visible {
     font-weight: var(--w-hover);
     font-variation-settings: 'wght' var(--w-hover);
+  }
+  @media (hover: hover) {
+    .weight-hover:hover:not(:disabled) {
+      font-weight: var(--w-hover);
+      font-variation-settings: 'wght' var(--w-hover);
+    }
   }
   /* Static emphasis at the hover weight (current step, open item). */
   .weight-up {
@@ -198,10 +234,14 @@
   .link .icon {
     transition: stroke-width 140ms ease;
   }
-  .link:hover .icon,
   .link:focus-visible .icon,
   .link.is-current .icon {
     stroke-width: 2;
+  }
+  @media (hover: hover) {
+    .link:hover .icon {
+      stroke-width: 2;
+    }
   }
   .link:disabled .icon,
   .link[aria-disabled='true'] .icon {
@@ -313,21 +353,31 @@
     border: 0;
     transition: transform 160ms ease;
   }
-  .slider:hover:not(:disabled)::-webkit-slider-runnable-track,
   .slider:focus-visible::-webkit-slider-runnable-track {
     background: theme('colors.ink');
   }
-  .slider:hover:not(:disabled)::-moz-range-track,
   .slider:focus-visible::-moz-range-track {
     background: theme('colors.ink');
   }
-  .slider:hover:not(:disabled)::-webkit-slider-thumb,
   .slider:active:not(:disabled)::-webkit-slider-thumb {
     transform: scale(1.35);
   }
-  .slider:hover:not(:disabled)::-moz-range-thumb,
   .slider:active:not(:disabled)::-moz-range-thumb {
     transform: scale(1.35);
+  }
+  @media (hover: hover) {
+    .slider:hover:not(:disabled)::-webkit-slider-runnable-track {
+      background: theme('colors.ink');
+    }
+    .slider:hover:not(:disabled)::-moz-range-track {
+      background: theme('colors.ink');
+    }
+    .slider:hover:not(:disabled)::-webkit-slider-thumb {
+      transform: scale(1.35);
+    }
+    .slider:hover:not(:disabled)::-moz-range-thumb {
+      transform: scale(1.35);
+    }
   }
   .slider:focus-visible {
     outline: 2px solid theme('colors.ink');
@@ -340,10 +390,38 @@
   }
 }
 
+/* Horizontal padding that clears the notch / Dynamic Island and rounded
+   corners of a landscape iPhone (index.html sets viewport-fit=cover). Use on
+   the page column and on every full-width fixed bar. */
+.px-safe {
+  padding-left: max(1rem, env(safe-area-inset-left));
+  padding-right: max(1rem, env(safe-area-inset-right));
+}
+@media (min-width: 640px) {
+  .px-safe {
+    padding-left: max(1.5rem, env(safe-area-inset-left));
+    padding-right: max(1.5rem, env(safe-area-inset-right));
+  }
+}
+@media (min-width: 1024px) {
+  .px-safe {
+    padding-left: max(2rem, env(safe-area-inset-left));
+    padding-right: max(2rem, env(safe-area-inset-right));
+  }
+}
+/* Only the insets (for bars that set their own padding). */
+.pl-safe-inset {
+  padding-left: env(safe-area-inset-left);
+}
+.pr-safe-inset {
+  padding-right: env(safe-area-inset-right);
+}
+
 /* Touch: every control at least 44 x 44 px, keeping the bare-text look -
    the box grows, the word stays centred in it. Inputs at 16px or more so
-   iOS doesn't zoom the page when one is focused. */
-@media (pointer: coarse) {
+   iOS doesn't zoom the page when one is focused. `any-pointer`, so a touch
+   laptop or an iPad with a trackpad counts (src/device.js). */
+@media (any-pointer: coarse) {
   .link {
     min-height: 44px;
     min-width: 44px;
@@ -360,6 +438,29 @@
   }
   .slider-touch {
     height: 44px;
+  }
+  /* A finger-sized thumb that still looks like the 9 px dot: the transparent
+     border is hit area, not paint. iOS doesn't jump to a tapped point on the
+     track, so the thumb itself has to be easy to catch. --thumb is its full
+     width, for tick marks positioned along the travel (.rs-fader). */
+  .slider {
+    --thumb: 28px;
+    min-height: 28px;
+  }
+  .slider::-webkit-slider-thumb {
+    box-sizing: content-box;
+    width: 9px;
+    height: 9px;
+    border: 9.5px solid transparent;
+    background-clip: padding-box;
+    margin-top: -13.5px;
+  }
+  .slider::-moz-range-thumb {
+    box-sizing: content-box;
+    width: 9px;
+    height: 9px;
+    border: 9.5px solid transparent;
+    background-clip: padding-box;
   }
 }
 

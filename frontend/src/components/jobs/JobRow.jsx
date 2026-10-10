@@ -158,7 +158,7 @@ export default function JobRow({
           )}
         </div>
       ) : (
-        <div className={`grid min-h-10 items-center gap-x-3 [@media(pointer:coarse)]:min-h-12 ${GRID[tier]}`}>
+        <div className={`grid min-h-10 items-center gap-x-3 coarse:min-h-12 ${GRID[tier]}`}>
           <a
             href={openHref}
             aria-current={current ? 'page' : undefined}

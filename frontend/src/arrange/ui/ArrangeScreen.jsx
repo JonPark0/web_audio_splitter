@@ -105,7 +105,7 @@ function formatAgo(ms) {
   return new Date(ms).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 }
 
-const tap = '[@media(pointer:coarse)]:min-h-[44px] [@media(pointer:coarse)]:min-w-[44px] items-center justify-center';
+const tap = 'coarse:min-h-[44px] coarse:min-w-[44px] items-center justify-center';
 
 /**
  * Arrange: place library samples on tracks at one project tempo, play them
@@ -1234,7 +1234,7 @@ export default function ArrangeScreen() {
 function TrackSheet({ track, index, count, onUpdate, onMove, onDelete }) {
   const [asking, setAsking] = useState(false);
   const set = (patch, coalesce) => onUpdate(track.id, patch, coalesce);
-  const btn = '[@media(pointer:coarse)]:min-h-[44px] justify-center';
+  const btn = 'coarse:min-h-[44px] justify-center';
   return (
     <div className="flex flex-col gap-3 px-4 py-3">
       <InlineName value={track.name} label="Track name" onCommit={(name) => set({ name })} className="text-h4" inputClassName="w-full text-p" />

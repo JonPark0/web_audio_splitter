@@ -92,7 +92,7 @@ export function Menu({ open, onClose, items, anchorRef, align = 'right', placeme
                 onClose();
                 item.onSelect?.();
               }}
-              className={`flex min-h-[40px] w-full items-center justify-between gap-6 border-0 bg-transparent px-4 text-left text-ink transition-opacity duration-140 hover:bg-wash disabled:text-muted disabled:hover:bg-transparent [@media(pointer:coarse)]:min-h-[44px] ${
+              className={`flex min-h-[40px] w-full items-center justify-between gap-6 border-0 bg-transparent px-4 text-left text-ink transition-opacity duration-140 hover:bg-wash disabled:text-muted disabled:hover:bg-transparent coarse:min-h-[44px] ${
                 item.checked ? 'weight-up' : ''
               }`}
             >

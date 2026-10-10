@@ -321,8 +321,8 @@ export default function UploadScreen() {
                 }`}
               >
                 <span data-label="Drop audio files or choose" className="link shrink-0 whitespace-nowrap group-hover:[--_w:400]">
-                  <span className="[@media(pointer:coarse)]:hidden">Drop audio files or choose</span>
-                  <span className="hidden [@media(pointer:coarse)]:inline">Choose audio files</span>
+                  <span className="coarse:hidden">Drop audio files or choose</span>
+                  <span className="hidden coarse:inline">Choose audio files</span>
                 </span>
                 <span className="min-w-0 text-right text-caption leading-tight text-muted">
                   {VIDEO_ACCEPTED ? 'Audio or video' : 'Audio'} · several at once

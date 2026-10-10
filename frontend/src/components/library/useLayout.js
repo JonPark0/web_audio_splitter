@@ -1,40 +1,16 @@
 import { useEffect, useState } from 'react';
+import { useDevice } from '../../device';
 
-// Same edges as Tailwind sm / lg / xl. JS-chosen (not CSS-hidden) so only
-// one layout's DOM exists - two hidden copies of 1000 rows would double the
-// node count the list is meant to cut.
-const QUERIES = {
-  tablet: '(min-width: 640px)',
-  desktop: '(min-width: 1024px)',
-  wide: '(min-width: 1280px)',
-  coarse: '(pointer: coarse)',
-};
-
-function read() {
-  const m = (q) => typeof window !== 'undefined' && window.matchMedia(q).matches;
-  const tablet = m(QUERIES.tablet);
-  const desktop = m(QUERIES.desktop);
-  return {
-    size: desktop ? 'desktop' : tablet ? 'tablet' : 'phone',
-    wide: m(QUERIES.wide), // room for the docked inspector
-    coarse: m(QUERIES.coarse),
-  };
-}
-
-/** { size: 'phone'|'tablet'|'desktop', wide, coarse } */
+/**
+ * { size: 'phone'|'tablet'|'desktop', wide, coarse } from src/device.js. Chosen
+ * in JS (not CSS-hidden) so only one layout's DOM exists - two hidden copies
+ * of 1000 rows would double the node count the list is meant to cut. A
+ * landscape phone gets the phone cards and a touch iPad the tablet grid (the
+ * desktop grid's 32 px columns can't hold 44 px touch targets).
+ */
 export default function useLayout() {
-  const [layout, setLayout] = useState(read);
-  useEffect(() => {
-    const lists = Object.values(QUERIES).map((q) => window.matchMedia(q));
-    const onChange = () =>
-      setLayout((prev) => {
-        const next = read();
-        return prev.size === next.size && prev.wide === next.wide && prev.coarse === next.coarse ? prev : next;
-      });
-    lists.forEach((l) => l.addEventListener('change', onChange));
-    return () => lists.forEach((l) => l.removeEventListener('change', onChange));
-  }, []);
-  return layout;
+  const { size, wide, coarse } = useDevice();
+  return { size, wide: size === 'desktop' && wide, coarse };
 }
 
 /** Boolean preference persisted per browser (try/catch: private mode). */

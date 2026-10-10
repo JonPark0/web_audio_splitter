@@ -42,7 +42,7 @@ export default function InlineName({ value, onCommit, label, className = '', inp
             finish();
           }
         }}
-        className={`ainput !pb-1 [@media(pointer:coarse)]:min-h-[44px] [@media(pointer:coarse)]:text-p ${inputClassName}`}
+        className={`ainput !pb-1 coarse:min-h-[44px] coarse:text-p ${inputClassName}`}
       />
     );
   }

@@ -23,8 +23,8 @@ function findClip(project, id) {
 
 const signed = (v, unit) => (v ? `${v > 0 ? '+' : '−'}${Math.abs(v)}${unit}` : `0${unit}`);
 
-const iconBtn = 'min-w-[20px] items-center justify-center [@media(pointer:coarse)]:min-h-[44px] [@media(pointer:coarse)]:min-w-[44px]';
-const wordBtn = '[@media(pointer:coarse)]:min-h-[44px] justify-center';
+const iconBtn = 'min-w-[20px] items-center justify-center coarse:min-h-[44px] coarse:min-w-[44px]';
+const wordBtn = 'coarse:min-h-[44px] justify-center';
 
 /** On/Off word toggle (Palnarium: current weight when on). */
 function Toggle({ on, onChange, disabled, title, label }) {
@@ -331,7 +331,7 @@ export default function ClipInspector({
             value={gainToDb(clip.gain)}
             onChange={(e) => patch({ gain: Math.min(4, Math.round(dbToGain(parseFloat(e.target.value)) * 10000) / 10000) }, { coalesce: `gain:${clip.id}` })}
             onDoubleClick={() => patch({ gain: 1 })}
-            className="slider [@media(pointer:coarse)]:h-11"
+            className="slider coarse:h-11"
             aria-label="Clip gain"
             aria-valuetext={formatDb(clip.gain)}
           />
