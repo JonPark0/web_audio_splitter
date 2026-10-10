@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import TextButton from '../../components/TextButton';
 import {
   canWarp,
@@ -17,7 +17,7 @@ import { dragSession, followPointer, releaseFocus } from './pointerDrag';
 import Ruler from './Ruler';
 import { SAMPLE_MIME, sampleDrag } from './sampleDrag';
 import TrackHeader from './TrackHeader';
-import { NEW_TRACK_ROW_HEIGHT, RULER_HEIGHT, RULER_HEIGHT_TOUCH, beatToPx, clampZoom, pxToBeat, snapBeat } from './snap';
+import { NEW_TRACK_ROW_HEIGHT, RULER_HEIGHT, RULER_HEIGHT_TOUCH, beatToPx, clampZoom, formatBarBeat, formatBeats, pxToBeat, snapBeat } from './snap';
 
 const DRAG_THRESHOLD_PX = 3;
 const TOUCH_SLOP_PX = 8; // finger movement that still counts as a tap / press
@@ -77,6 +77,9 @@ function edgeRoom(track, id, x0, x1, span) {
  *            two fingers pinch-zoom. With an armed sample a tap places it.
  *   pen    - like the mouse, but holds the scroll for the whole drag; while
  *            a pen is in use the lanes, clips and ruler don't pan at all.
+ *   keys   - one clip is in the tab order (the focused, else the first
+ *            selected, else the first clip); Tab onto it selects it.
+ *            ArrangeScreen's shortcuts walk, nudge and open clips.
  *
  * One drag at a time, owned by the pointer that started it: other fingers
  * never move it, and pinch, touch scrolling and Follow wait until it ends.
@@ -84,40 +87,43 @@ function edgeRoom(track, id, x0, x1, span) {
  * a scroll or zoom under a still pointer keeps the clip under it. Escape
  * cancels.
  */
-export default function Timeline({
-  project,
-  engine,
-  clock,
-  meterClock,
-  height,
-  pxPerBeat,
-  step,
-  laneHeight,
-  headerWidth,
-  mode,
-  coarse,
-  follow,
-  selection,
-  selectedTrackId,
-  pending,
-  armedSample,
-  onSelectClips,
-  onSelectTrack,
-  onUpdateTrack,
-  onDeleteTrack,
-  onMoveTrack,
-  onOpenTrack,
-  onAddTrack,
-  onMoveClips,
-  onPatchClip,
-  onZoomTo,
-  onDropSample,
-  onPlaceArmed,
-  onSeek,
-  onLoopChange,
-  onRenameMarker,
-  onViewWidth,
-}) {
+export default forwardRef(function Timeline(
+  {
+    project,
+    engine,
+    clock,
+    meterClock,
+    height,
+    pxPerBeat,
+    step,
+    laneHeight,
+    headerWidth,
+    mode,
+    coarse,
+    follow,
+    selection,
+    selectedTrackId,
+    pending,
+    armedSample,
+    onSelectClips,
+    onSelectTrack,
+    onUpdateTrack,
+    onDeleteTrack,
+    onMoveTrack,
+    onOpenTrack,
+    onAddTrack,
+    onMoveClips,
+    onPatchClip,
+    onZoomTo,
+    onDropSample,
+    onPlaceArmed,
+    onSeek,
+    onLoopChange,
+    onRenameMarker,
+    onViewWidth,
+  },
+  ref
+) {
   const scrollRef = useRef(null);
   const lanesRef = useRef(null);
   const [viewWidth, setViewWidth] = useState(0);
@@ -131,6 +137,9 @@ export default function Timeline({
   // pen: a pen is in use (mirrors `pen` below for the handlers).
   const gesture = useRef({ owner: null, pinching: false, pointer: 'mouse', pen: false });
   const [pen, setPen] = useState(false);
+  // The clip with focus; ring: keyboard focus (:focus-visible), drawn here.
+  const [focused, setFocused] = useState(null); // {id, ring}
+  const quietFocus = useRef(false); // our own focus() calls don't select
   const rulerHeight = coarse ? RULER_HEIGHT_TOUCH : RULER_HEIGHT;
 
   const { tracks, samples = {}, bpm } = project;
@@ -386,6 +395,63 @@ export default function Timeline({
   };
   const pan = pen ? 'none' : 'pan-x pan-y';
 
+  // ---- clip focus (keyboard) ----
+  // The whole clip and its ring in view, clear of the pinned header column
+  // and ruler: the browser's focus scroll ignores those, and leaves a clip
+  // that is partly in view where it is.
+  const reveal = useCallback((el) => {
+    const sc = scrollRef.current;
+    const r = el.getBoundingClientRect();
+    const v = sc.getBoundingClientRect();
+    const pad = 4; // the ring: 2 px clear + 2 px line
+    const x0 = v.left + sc.clientLeft + live.current.headerWidth + pad;
+    const x1 = v.left + sc.clientLeft + sc.clientWidth - pad;
+    const y0 = v.top + sc.clientTop + live.current.rulerHeight + pad;
+    const y1 = v.top + sc.clientTop + sc.clientHeight - pad;
+    // Too big to fit: its start wins.
+    if (r.left < x0 || r.right > x1) sc.scrollLeft += r.left < x0 ? r.left - x0 : Math.min(r.right - x1, r.left - x0);
+    if (r.top < y0 || r.bottom > y1) sc.scrollTop += r.top < y0 ? r.top - y0 : Math.min(r.bottom - y1, r.top - y0);
+  }, []);
+  const onClipFocus = useCallback(
+    (e) => {
+      const el = e.currentTarget;
+      const id = el.dataset.clip;
+      let ring = true;
+      try {
+        ring = el.matches(':focus-visible');
+      } catch (err) {
+        // no :focus-visible: treat as keyboard focus
+      }
+      setFocused({ id, ring });
+      if (!ring) return;
+      reveal(el);
+      // Tab onto a clip selects it; a tap or our own focus() doesn't.
+      const { project: p, selection: sel, onSelectClips: select } = live.current;
+      if (quietFocus.current || sel.includes(id)) return;
+      select([id], p.tracks.find((t) => t.clips.some((c) => c.id === id))?.id);
+    },
+    [reveal]
+  );
+  const onClipBlur = useCallback(() => setFocused(null), []);
+  useImperativeHandle(
+    ref,
+    () => ({
+      /** Focus a clip without selecting it. */
+      focusClip(id) {
+        const el = id && lanesRef.current?.querySelector(`[data-clip="${CSS.escape(id)}"]`);
+        if (!el) return false;
+        quietFocus.current = true;
+        try {
+          el.focus({ preventScroll: true }); // revealed on focus
+        } finally {
+          quietFocus.current = false;
+        }
+        return true;
+      },
+    }),
+    []
+  );
+
   // Lanes coordinates (the rect includes the scroll) at the current zoom.
   const pointAt = useCallback((clientX, clientY) => {
     const rect = lanesRef.current.getBoundingClientRect();
@@ -500,7 +566,8 @@ export default function Timeline({
       // The preventDefault below stops the focus move: commit an open
       // rename, let go of the Snap select or a fader - otherwise Delete,
       // arrows and Space keep going to them. (Touch too: iOS never blurs.)
-      releaseFocus(lanesRef.current);
+      // A clip keeps focus only when it is the one pressed.
+      releaseFocus(e.currentTarget.closest('[data-clip]'));
       if (e.pointerType === 'touch' && mode === 'move') {
         // Touch: a swipe must scroll, so the clip only lifts after a still
         // long-press; until then the browser may take the gesture.
@@ -584,7 +651,7 @@ export default function Timeline({
   const onLanesPointerDown = (e) => {
     if (e.button !== 0 || e.target.closest('[data-clip],[data-handle]')) return;
     if (gesture.current.owner) return; // another pointer is dragging
-    releaseFocus(lanesRef.current);
+    releaseFocus();
     const start = pointAt(e.clientX, e.clientY);
     const x0 = e.clientX;
     const y0 = e.clientY;
@@ -742,8 +809,17 @@ export default function Timeline({
     return ids;
   }, [overlaps, tracks, samples, bpm]);
 
+  // Roving tab stop: the one clip Tab reaches - the focused clip, else the
+  // first selected, else the first in time on the first track with clips.
+  const focusedId = focused?.id;
+  const tabStop = useMemo(() => {
+    const all = tracks.flatMap((t) => [...t.clips].sort((a, b) => a.start_beat - b.start_beat));
+    return (all.find((c) => c.id === focusedId) || all.find((c) => selectedSet.has(c.id)) || all[0])?.id;
+  }, [tracks, focusedId, selectedSet]);
+
   const clipViews = [];
   const handles = [];
+  let ringBox = null; // the focused clip's box, for the focus ring
   tracks.forEach((track, ti) => {
     const dimmed = !isTrackAudible(track, tracks);
     for (const clip of track.clips) {
@@ -765,6 +841,7 @@ export default function Timeline({
       const top = index * lane + CLIP_INSET;
       const w = beatToPx(beats, pxPerBeat);
       const selected = bandSet ? bandSet.has(clip.id) : selectedSet.has(clip.id);
+      if (focused?.ring && focused.id === clip.id) ringBox = { left, top, right: left + Math.max(2, w), bottom: top + clipHeight };
       clipViews.push(
         <ClipView
           key={clip.id}
@@ -785,8 +862,14 @@ export default function Timeline({
           coarse={coarse}
           handlePx={MOUSE_HANDLE_PX}
           engine={engine}
+          where={`${tracks[index]?.name ?? track.name}, bar ${formatBarBeat(shown.start_beat, beatsPerBar)}, ${formatBeats(beats)} ${
+            beats === 1 ? 'beat' : 'beats'
+          }`}
+          tabIndex={clip.id === tabStop ? 0 : -1}
           touchAction={pan}
           onClipPointerDown={onClipPointerDown}
+          onFocus={onClipFocus}
+          onBlur={onClipBlur}
         />
       );
       // Touch trim handles: only on the selected clip, OUTSIDE its edges so a
@@ -956,6 +1039,23 @@ export default function Timeline({
             {clipViews}
             {handles}
 
+            {/* Keyboard focus ring (the global one: 2 px ink, 2 px clear).
+                Drawn here: a clip clips its content and its outline is its
+                edge; and clamped inside the lanes, so a clip at beat 0 or on
+                the top track doesn't lose half of it under the headers. */}
+            {ringBox &&
+              (() => {
+                const x = Math.max(2, ringBox.left - 2);
+                const y = Math.max(2, ringBox.top - 2);
+                return (
+                  <div
+                    aria-hidden="true"
+                    className="pointer-events-none absolute z-30 outline outline-2 outline-ink"
+                    style={{ left: x, top: y, width: ringBox.right + 2 - x, height: ringBox.bottom + 2 - y }}
+                  />
+                );
+              })()}
+
             {overlaps.map((o, i) => (
               <div
                 // eslint-disable-next-line react/no-array-index-key
@@ -1024,5 +1124,4 @@ export default function Timeline({
       </div>
     </div>
   );
-}
-
+});

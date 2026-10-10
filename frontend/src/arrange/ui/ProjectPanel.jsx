@@ -20,6 +20,10 @@ export default function ProjectPanel({ project, variant = 'dock', onLoopChange, 
   const sheet = variant === 'sheet';
   const parse = (t) => parseBarBeat(t, bpb);
   const markers = project.markers || [];
+  // Tab reaches the clips; Alt (Option) + arrows walk them, plain ones nudge.
+  const hints = `Click a clip to edit · drag an empty lane to select · S splits · ${MOD}+C/V copy/paste · ←/→ nudge · ${
+    MOD === 'Ctrl' ? 'Alt' : '⌥'
+  }+arrows next clip · Enter edits · L loop · Home · +/− zoom · Space`;
 
   return (
     <div className={sheet ? 'flex flex-col gap-3 px-4 py-3' : 'flex flex-col gap-1'}>
@@ -115,8 +119,8 @@ export default function ProjectPanel({ project, variant = 'dock', onLoopChange, 
         </Group>
       </div>
       {showHints && (
-        <p className="m-0 truncate text-caption">
-          Click a clip to edit · drag an empty lane to select · S splits · {MOD}+C/V copy/paste · ←/→ nudge · L loop · Home · +/− zoom · Space
+        <p className="m-0 truncate text-caption" title={hints}>
+          {hints}
         </p>
       )}
     </div>

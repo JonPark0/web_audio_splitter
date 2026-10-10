@@ -96,6 +96,45 @@ function summarize(p) {
   };
 }
 
+/** A track's clips in time order. */
+const inTime = (track) => [...track.clips].sort((a, b) => a.start_beat - b.start_beat);
+
+/**
+ * Where Alt+arrow goes from clip `id`: ←/→ the previous/next clip on its
+ * track, ↑/↓ the one nearest in time on the closest track above/below that
+ * has clips. { clip, trackId }, or null at the ends.
+ */
+function adjacentClip(p, id, key) {
+  const ti = p.tracks.findIndex((t) => t.clips.some((c) => c.id === id));
+  if (ti < 0) return null;
+  const from = p.tracks[ti].clips.find((c) => c.id === id);
+  if (key === 'ArrowLeft' || key === 'ArrowRight') {
+    const list = inTime(p.tracks[ti]);
+    const clip = list[list.indexOf(from) + (key === 'ArrowRight' ? 1 : -1)];
+    return clip ? { clip, trackId: p.tracks[ti].id } : null;
+  }
+  const dir = key === 'ArrowDown' ? 1 : -1;
+  const at = from.start_beat;
+  for (let t = ti + dir; t >= 0 && t < p.tracks.length; t += dir) {
+    let best = null;
+    let bestGap = Infinity;
+    for (const c of inTime(p.tracks[t])) {
+      // Beats between `at` and the clip: 0 while it plays there.
+      const end = clipEndBeat(c, p.samples[c.sample_id], p.bpm);
+      const gap = c.start_beat > at ? c.start_beat - at : end > at ? 0 : at - end + 1e-6;
+      if (gap < bestGap) {
+        best = c;
+        bestGap = gap;
+      }
+    }
+    if (best) return { clip: best, trackId: p.tracks[t].id };
+  }
+  return null;
+}
+
+/** Id of the clip that has keyboard focus, or null. */
+const focusedClipId = () => document.activeElement?.closest?.('[data-clip]')?.dataset.clip ?? null;
+
 // Keys a focused control keeps for itself: a select's arrows / Space / Home,
 // and a slider's arrows when it was reached with Tab (a fader that was just
 // clicked lets the arrows nudge clips again).
@@ -115,6 +154,8 @@ function ownsKey(target, e) {
 
 /** A shortcut hint: "Ctrl+C", or "⌘C" on Apple. */
 const hint = (key, shift) => (MOD === 'Ctrl' ? `Ctrl+${shift ? 'Shift+' : ''}${key}` : `${shift ? '⇧' : ''}${MOD}${key}`);
+/** "Alt+→", or "⌥→" on Apple. */
+const altHint = (key) => (MOD === 'Ctrl' ? `Alt+${key}` : `⌥${key}`);
 
 function formatAgo(ms) {
   const s = Math.round((Date.now() - ms) / 1000);
@@ -198,6 +239,8 @@ export default function ArrangeScreen() {
   const samplesBtnRef = useRef(null);
   const clipBtnRef = useRef(null);
   const bottomBarRef = useRef(null);
+  const timelineRef = useRef(null);
+  const dockRef = useRef(null);
   const projectRef = useRef(project);
   projectRef.current = project;
 
@@ -733,6 +776,64 @@ export default function ArrangeScreen() {
     [liveSelection, moveClips, pickedClips]
   );
 
+  // ---------------- keyboard reach (clips) ----------------
+  /**
+   * Alt+arrows: select the neighbouring clip (plain arrows nudge). From the
+   * focused clip, else the last one selected (`orFirst`: else the first
+   * clip). Focus follows when it was on a clip or nowhere. False when there
+   * is nothing to go from.
+   */
+  const stepClip = useCallback(
+    (key, orFirst) => {
+      const p = projectRef.current;
+      if (!p) return false;
+      const focusedId = focusedClipId();
+      const from = focusedId && clipIds.has(focusedId) ? focusedId : liveSelection[liveSelection.length - 1];
+      let next = from && adjacentClip(p, from, key);
+      if (!from) {
+        const t = p.tracks.find((tr) => tr.clips.length);
+        if (!orFirst || !t) return false;
+        next = { clip: inTime(t)[0], trackId: t.id };
+      }
+      if (!next) return true; // at the end (and not the browser's Back)
+      selectClips([next.clip.id], next.trackId);
+      const a = document.activeElement;
+      if (focusedId || !a || a === document.body) timelineRef.current?.focusClip(next.clip.id);
+      return true;
+    },
+    [clipIds, liveSelection, selectClips]
+  );
+
+  // Delete / cut from a focused clip: focus moves on first - to the next clip
+  // left on its track, else the previous, else the first anywhere - so the
+  // keyboard stays in the timeline. That clip isn't selected.
+  const handOffFocus = useCallback(() => {
+    const p = projectRef.current;
+    const id = focusedClipId();
+    if (!p || !id || !liveSelection.includes(id)) return;
+    const gone = new Set(liveSelection);
+    const left = (c) => !gone.has(c.id);
+    const list = inTime(p.tracks.find((t) => t.clips.some((c) => c.id === id)));
+    const i = list.findIndex((c) => c.id === id);
+    const next = list.slice(i + 1).find(left) || list.slice(0, i).reverse().find(left) || p.tracks.flatMap(inTime).find(left);
+    timelineRef.current?.focusClip(next?.id);
+  }, [liveSelection]);
+
+  // Enter on a focused clip: select it, or open what edits it (the clip
+  // sheet; on desktop, focus moves into the docked inspector).
+  const openClip = useCallback(
+    (target) => {
+      const p = projectRef.current;
+      const id = target instanceof Element ? target.closest('[data-clip]')?.dataset.clip : null;
+      if (!p || !id) return false;
+      if (!liveSelection.includes(id)) selectClips([id], p.tracks.find((t) => t.clips.some((c) => c.id === id))?.id);
+      else if (desktop) dockRef.current?.querySelector('button:not(:disabled), input, select')?.focus();
+      else setSheet('clip');
+      return true;
+    },
+    [desktop, liveSelection, selectClips]
+  );
+
   // ---------------- markers ----------------
   const addMarker = useCallback(() => {
     const p = projectRef.current;
@@ -817,6 +918,9 @@ export default function ArrangeScreen() {
     selectAll,
     nudge,
     moveSelectionTracks,
+    stepClip,
+    handOffFocus,
+    openClip,
     toggleLoop,
     seek,
     onZoom,
@@ -848,21 +952,26 @@ export default function ArrangeScreen() {
           return true;
         }
         if (mod && key === 'c') return sel && (k.copySelected(), true);
-        if (mod && key === 'x') return sel && (k.cutSelected(), true);
+        if (mod && key === 'x') return sel && (k.handOffFocus(), k.cutSelected(), true);
         if (mod && key === 'v') return k.paste(), true;
         if (mod && key === 'a') return k.selectAll(), true;
         if (mod && key === 'd') return sel && (k.duplicateSelected(), true);
         if (mod && key === 'e') return k.splitAtPlayhead(), true;
+        // Alt (Option) + arrows walk between clips; plain arrows nudge them.
+        if (e.altKey && !mod && (e.key || '').startsWith('Arrow')) return k.stepClip(e.key);
         if (mod || e.altKey) return false;
         if (key === 's') return k.splitAtPlayhead(), true;
         if (key === 'l') return k.toggleLoop(), true;
         if (e.key === 'Home') return k.seek(0), true;
         if (e.key === '+' || e.key === '=') return k.onZoom(1), true;
         if (e.key === '-' || e.key === '_') return k.onZoom(-1), true;
-        if (e.key === 'Delete' || e.key === 'Backspace') return sel && (k.deleteSelected(), true);
+        if (e.key === 'Enter') return k.openClip(e.target);
+        if (e.key === 'Delete' || e.key === 'Backspace') return sel && (k.handOffFocus(), k.deleteSelected(), true);
         if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') return sel && (k.nudge(e.key === 'ArrowLeft' ? -1 : 1, e.shiftKey), true);
         if (e.key === 'ArrowUp' || e.key === 'ArrowDown') return sel && (k.moveSelectionTracks(e.key === 'ArrowUp' ? -1 : 1), true);
         if (e.key === 'Escape') {
+          // From the docked inspector, back to the clip it was editing.
+          if (dockRef.current?.contains(e.target)) timelineRef.current?.focusClip(k.liveSelection[k.liveSelection.length - 1]);
           setSelection([]);
           setArmedSample(null);
           return true;
@@ -965,6 +1074,8 @@ export default function ArrangeScreen() {
         { label: 'Copy', hint: hint('C'), disabled: !liveSelection.length, onSelect: copySelected },
         { label: 'Paste at playhead', hint: hint('V'), onSelect: paste },
         { label: 'Select all', hint: hint('A'), onSelect: selectAll },
+        { label: 'Previous clip', hint: altHint('←'), disabled: !clipIds.size, onSelect: () => stepClip('ArrowLeft', true) },
+        { label: 'Next clip', hint: altHint('→'), disabled: !clipIds.size, onSelect: () => stepClip('ArrowRight', true) },
       ]
     : [];
   const clickItem = { label: 'Click (metronome)', checked: metronome, onSelect: toggleMetronome };
@@ -1193,6 +1304,7 @@ export default function ArrangeScreen() {
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="min-h-0 flex-1">
             <Timeline
+              ref={timelineRef}
               project={project}
               engine={engine}
               clock={clock}
@@ -1230,7 +1342,10 @@ export default function ArrangeScreen() {
           {/* Fixed with a mouse; on touch (44 px rows) as tall as its content,
               up to 40% of the screen, scrolling beyond that. */}
           {desktop && (
-            <div className="h-[124px] shrink-0 overflow-y-auto overscroll-contain border-t border-line pt-1.5 coarse:h-auto coarse:max-h-[40%] coarse:min-h-[124px]">
+            <div
+              ref={dockRef}
+              className="h-[124px] shrink-0 overflow-y-auto overscroll-contain border-t border-line pt-1.5 coarse:h-auto coarse:max-h-[40%] coarse:min-h-[124px]"
+            >
               {inspector || projectPanel}
             </div>
           )}
