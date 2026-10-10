@@ -9,10 +9,16 @@
  *                       `<name>[-loop]-stems.zip` with `<name>[-loop]-stem-<track>.wav`
  *     normalize  scale to a -1 dBFS peak; stems share ONE gain (the loudest
  *                stem's), so their balance still sums back to the mix
+ *
+ * Stems are rendered and encoded one at a time, each dropped before the
+ * next (a float stem is ~23 MB per minute, its WAV ~17 MB more): holding
+ * them all crashed phone tabs. Normalising needs the loudest stem first, so
+ * it renders twice - peaks, then the files; offline rendering is
+ * deterministic, so the output is the same as scaling kept buffers.
  */
 import { projectEndBeat } from './project';
 import { encodeWav, encodeWavBytes } from './wav';
-import { zipFiles } from './zip';
+import { zipEntry, zipFiles } from './zip';
 
 export const EXPORT_SAMPLE_RATE = 48000;
 const NORMALIZE_PEAK = 10 ** (-1 / 20); // -1 dBFS
@@ -31,8 +37,9 @@ export function downloadBlob(blob, fileName) {
   document.body.appendChild(a);
   a.click();
   a.remove();
-  // Revoking synchronously can cancel the download in some browsers.
-  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  // Revoking synchronously can cancel the download in some browsers, and iOS
+  // asks "Download?" first, reading the blob only once that's answered.
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
 function peakOf(buffer) {
@@ -85,25 +92,33 @@ export async function exportAudio(engine, project, { scope = 'song', stems = fal
 
   const tracks = project.tracks.filter((t) => t.clips.length > 0);
   if (!tracks.length) throw new Error('Nothing to export: no track has clips.');
-  const rendered = [];
-  for (let i = 0; i < tracks.length; i++) {
-    onProgress?.({ done: i, total: tracks.length });
-    // eslint-disable-next-line no-await-in-loop
-    const buffer = await engine.renderOffline(project, { ...opts, soloTrackId: tracks[i].id });
-    rendered.push({ track: tracks[i], buffer });
-  }
+  const total = normalize ? tracks.length * 2 : tracks.length;
+  const render = (track) => engine.renderOffline(project, { ...opts, soloTrackId: track.id });
+
+  let gain = 1;
   if (normalize) {
-    const peak = Math.max(...rendered.map((r) => peakOf(r.buffer)));
-    if (peak > 0) rendered.forEach((r) => scale(r.buffer, NORMALIZE_PEAK / peak));
+    let peak = 0;
+    for (let i = 0; i < tracks.length; i++) {
+      onProgress?.({ done: i, total });
+      // eslint-disable-next-line no-await-in-loop
+      peak = Math.max(peak, peakOf(await render(tracks[i])));
+    }
+    if (peak > 0) gain = NORMALIZE_PEAK / peak;
   }
+
   const used = new Set();
-  const files = rendered.map(({ track, buffer }) => {
-    let name = `${base}-stem-${safeFileName(track.name, 'track')}`;
-    for (let n = 2; used.has(name); n++) name = `${base}-stem-${safeFileName(track.name, 'track')}-${n}`;
+  const files = [];
+  for (let i = 0; i < tracks.length; i++) {
+    onProgress?.({ done: total - tracks.length + i, total });
+    // eslint-disable-next-line no-await-in-loop
+    const buffer = await render(tracks[i]);
+    scale(buffer, gain);
+    let name = `${base}-stem-${safeFileName(tracks[i].name, 'track')}`;
+    for (let n = 2; used.has(name); n++) name = `${base}-stem-${safeFileName(tracks[i].name, 'track')}-${n}`;
     used.add(name);
-    return { name: `${name}.wav`, data: encodeWavBytes(buffer, { bitDepth: 24 }) };
-  });
-  onProgress?.({ done: tracks.length, total: tracks.length });
+    files.push(zipEntry(`${name}.wav`, encodeWavBytes(buffer, { bitDepth: 24 })));
+  }
+  onProgress?.({ done: total, total });
   downloadBlob(zipFiles(files), `${base}-stems.zip`);
   return { files: files.map((f) => f.name) };
 }

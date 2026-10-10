@@ -3,6 +3,8 @@
  * this keeps it dependency-free). Enough for bundling stem exports.
  *
  *   const blob = zipFiles([{ name: 'a.wav', data: arrayBuffer }, …]);
+ *   // or, to let each file's bytes go as soon as it's made (stem export):
+ *   const blob = zipFiles([zipEntry('a.wav', arrayBuffer), …]);
  */
 
 let CRC_TABLE = null;
@@ -32,7 +34,17 @@ function dosDateTime(d = new Date()) {
 }
 
 /**
- * @param {{name: string, data: ArrayBuffer|Uint8Array}[]} files
+ * One file, checksummed now and held as a Blob, so the caller can drop the
+ * bytes (the browser may keep a Blob out of the page's memory).
+ * @returns {{name: string, crc: number, size: number, blob: Blob}}
+ */
+export function zipEntry(name, data) {
+  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+  return { name, crc: crc32(bytes), size: bytes.length, blob: new Blob([bytes]) };
+}
+
+/**
+ * @param {({name: string, data: ArrayBuffer|Uint8Array} | ReturnType<typeof zipEntry>)[]} files
  * @returns {Blob} application/zip
  */
 export function zipFiles(files) {
@@ -43,9 +55,8 @@ export function zipFiles(files) {
   let offset = 0;
 
   for (const f of files) {
-    const data = f.data instanceof Uint8Array ? f.data : new Uint8Array(f.data);
+    const { crc, size, blob } = f.blob ? f : zipEntry(f.name, f.data);
     const name = enc.encode(f.name);
-    const crc = crc32(data);
 
     const local = new DataView(new ArrayBuffer(30));
     local.setUint32(0, 0x04034b50, true);
@@ -55,11 +66,11 @@ export function zipFiles(files) {
     local.setUint16(10, time, true);
     local.setUint16(12, date, true);
     local.setUint32(14, crc, true);
-    local.setUint32(18, data.length, true);
-    local.setUint32(22, data.length, true);
+    local.setUint32(18, size, true);
+    local.setUint32(22, size, true);
     local.setUint16(26, name.length, true);
     local.setUint16(28, 0, true);
-    parts.push(local.buffer, name, data);
+    parts.push(local.buffer, name, blob);
 
     const cen = new DataView(new ArrayBuffer(46));
     cen.setUint32(0, 0x02014b50, true);
@@ -70,13 +81,13 @@ export function zipFiles(files) {
     cen.setUint16(12, time, true);
     cen.setUint16(14, date, true);
     cen.setUint32(16, crc, true);
-    cen.setUint32(20, data.length, true);
-    cen.setUint32(24, data.length, true);
+    cen.setUint32(20, size, true);
+    cen.setUint32(24, size, true);
     cen.setUint16(28, name.length, true);
     cen.setUint32(42, offset, true);
     central.push(cen.buffer, name);
 
-    offset += 30 + name.length + data.length;
+    offset += 30 + name.length + size;
   }
 
   const centralSize = central.reduce((n, p) => n + (p.byteLength ?? p.length), 0);
