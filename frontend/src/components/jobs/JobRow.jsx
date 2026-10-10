@@ -17,25 +17,51 @@ import {
 } from './format';
 
 // Column templates per pane-width tier (see JobsPane). Name takes the rest;
-// the actions column (--acts) widens on touch, where each word is a 44px
-// target.
+// the checkbox (--chk) and actions (--acts) columns widen on touch, where
+// each control is a 44px target.
 export const GRID = {
-  wide: 'grid-cols-[minmax(0,1fr)_2.75rem_8.5rem_5.5rem_9.5rem_3.75rem_var(--acts)]',
-  medium: 'grid-cols-[minmax(0,1fr)_2.75rem_8.5rem_9.5rem_var(--acts)]',
+  wide: 'grid-cols-[var(--chk)_minmax(0,1fr)_2.75rem_8.5rem_5.5rem_9.5rem_3.75rem_var(--acts)]',
+  medium: 'grid-cols-[var(--chk)_minmax(0,1fr)_2.75rem_8.5rem_9.5rem_var(--acts)]',
 };
 
-/** Column labels for the single-line tiers. */
-export function JobsHeaderRow({ tier }) {
+/** A row's (or the header's) selection checkbox in a full-height hit area. */
+export function CheckCell({ checked, indeterminate = false, onToggle, label, className = '' }) {
+  return (
+    <label className={`flex h-full min-h-10 cursor-pointer items-center justify-center coarse:min-h-11 ${className}`}>
+      <input
+        type="checkbox"
+        checked={checked}
+        ref={(el) => {
+          if (el) el.indeterminate = indeterminate;
+        }}
+        onChange={() => {}}
+        onClick={(e) => onToggle(e.shiftKey)}
+        aria-label={label}
+        className="m-0 h-3.5 w-3.5 cursor-pointer coarse:h-5 coarse:w-5"
+      />
+    </label>
+  );
+}
+
+/** Column labels for the single-line tiers, with the select-all box. */
+export function JobsHeaderRow({ tier, allChecked = false, someChecked = false, onCheckAll }) {
   if (tier === 'narrow') return null;
   return (
-    <div aria-hidden="true" className={`grid ${GRID[tier]} gap-x-3 pt-1 text-caption text-muted`}>
-      <span>Name</span>
+    <div className={`grid ${GRID[tier]} items-center gap-x-3 text-caption text-muted`}>
+      <CheckCell
+        checked={allChecked}
+        indeterminate={someChecked && !allChecked}
+        onToggle={() => onCheckAll?.()}
+        label={allChecked ? 'Unselect all jobs' : 'Select all jobs'}
+        className="!min-h-7 coarse:!min-h-11"
+      />
+      <span aria-hidden="true">Name</span>
       <span>Length</span>
       <span>Model</span>
-      {tier === 'wide' && <span>Tempo · Key</span>}
-      <span>Status</span>
-      {tier === 'wide' && <span>Created</span>}
-      <span className="text-right">Actions</span>
+      {tier === 'wide' && <span aria-hidden="true">Tempo · Key</span>}
+      <span aria-hidden="true">Status</span>
+      {tier === 'wide' && <span aria-hidden="true">Created</span>}
+      <span aria-hidden="true" className="text-right">Actions</span>
     </div>
   );
 }
@@ -97,7 +123,9 @@ function Actions({ actions, task, panel, onAction, className = '' }) {
  * sit behind "⋯". Retry, cancel and delete confirmation and the phone action
  * list open as a strip under the row; focus goes into a strip when it opens
  * and back to its action when it closes. On touch, where there is no hover
- * title, long names wrap to a second line.
+ * title, long names wrap to a second line. A checkbox selects the row for
+ * bulk actions: always shown on the single-line tiers; on the narrow one
+ * while selecting, when tapping the row checks it instead of opening it.
  */
 export default function JobRow({
   task,
@@ -112,6 +140,9 @@ export default function JobRow({
   cancelling,
   error,
   now,
+  selecting = false,
+  checked = false,
+  onCheck,
 }) {
   const id = task.task_id;
   const name = jobName(task);
@@ -146,19 +177,35 @@ export default function JobRow({
   const retryMarker = task.retry_of ? <span className="text-caption text-muted"> · retry</span> : null;
 
   return (
-    <li ref={rowRef} data-job-row={id} className="flex flex-col">
+    <li ref={rowRef} data-job-row={id} className={`flex flex-col ${checked ? 'bg-wash' : ''}`}>
       {tier === 'narrow' ? (
         <div className="relative flex min-h-14 items-center gap-2 py-1.5">
+          {selecting && (
+            <CheckCell checked={checked} onToggle={(shift) => onCheck(shift)} label={`Select ${name}`} className="relative z-10 -ml-1 w-11 shrink-0" />
+          )}
           <div className="min-w-0 flex-1">
-            {/* the name's ::before stretches over the row: tapping anywhere opens */}
-            <a
-              href={openHref}
-              aria-current={current ? 'page' : undefined}
-              className={`line-clamp-2 break-words weight-hover before:absolute before:inset-0 before:content-[''] ${current ? 'weight-up' : ''}`}
-            >
-              {name}
-              {retryMarker}
-            </a>
+            {/* the name's ::before stretches over the row: tapping anywhere
+                opens — or, while selecting, checks the row */}
+            {selecting ? (
+              <button
+                type="button"
+                aria-pressed={checked}
+                onClick={(e) => onCheck(e.shiftKey)}
+                className="line-clamp-2 w-full break-words border-0 bg-transparent p-0 text-left before:absolute before:inset-0 before:content-['']"
+              >
+                {name}
+                {retryMarker}
+              </button>
+            ) : (
+              <a
+                href={openHref}
+                aria-current={current ? 'page' : undefined}
+                className={`line-clamp-2 break-words weight-hover before:absolute before:inset-0 before:content-[''] ${current ? 'weight-up' : ''}`}
+              >
+                {name}
+                {retryMarker}
+              </a>
+            )}
             <p className="m-0 truncate text-caption text-muted">
               <span className="text-ink">{status}</span>
               {[formatDuration(task.duration), modelText(task), formatWhen(task.created_at, now)]
@@ -185,6 +232,7 @@ export default function JobRow({
         </div>
       ) : (
         <div className={`grid min-h-10 items-center gap-x-3 coarse:min-h-12 coarse:py-1 ${GRID[tier]}`}>
+          <CheckCell checked={checked} onToggle={(shift) => onCheck(shift)} label={`Select ${name}`} />
           <a
             href={openHref}
             aria-current={current ? 'page' : undefined}

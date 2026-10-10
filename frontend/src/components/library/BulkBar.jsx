@@ -1,5 +1,5 @@
 import React, { useId, useState } from 'react';
-import { FiMoreHorizontal } from 'react-icons/fi';
+import { FiMoreHorizontal, FiX } from 'react-icons/fi';
 import { isComposing } from '../../keys';
 import TextButton from '../TextButton';
 import { PlayGlyph } from './SampleRow';
@@ -114,24 +114,27 @@ export default function BulkBar({ phone, count, matched, allMatched, onSelectAll
               <DeleteAsk count={count} busy={busy} onCancel={() => setAsking(false)} onConfirm={() => (setAsking(false), onDelete())} />
             ) : (
               <>
+                <TextButton label="" aria-label="Stop selecting" onClick={onClear} className="-ml-2.5 h-11 w-11 shrink-0 justify-center">
+                  <FiX className="icon" strokeWidth={1.5} aria-hidden="true" />
+                </TextButton>
                 {playing && (
                   <TextButton
                     label=""
                     onClick={playing.onStop}
                     aria-label={`Stop ${playing.sample.name}`}
                     current
-                    className="-ml-3 h-11 w-11 shrink-0 justify-center text-h4"
+                    className="h-11 w-11 shrink-0 justify-center text-h4"
                   >
                     <PlayGlyph playing loading={playing.loading} />
                   </TextButton>
                 )}
                 <span className="min-w-0 flex-1 truncate tabular-nums" aria-live="polite">
-                  {progress || `${count} selected`}
+                  {progress || (count ? `${count} selected` : 'Tap samples to select')}
                 </span>
-                <TextButton disabled={busy} onClick={() => setSheet('tags')} className={COARSE}>
+                <TextButton disabled={busy || !count} onClick={() => setSheet('tags')} className={COARSE}>
                   Tag
                 </TextButton>
-                <TextButton disabled={busy} onClick={() => setAsking(true)} className={COARSE}>
+                <TextButton disabled={busy || !count} onClick={() => setAsking(true)} className={COARSE}>
                   Delete
                 </TextButton>
                 <TextButton label="" aria-label="More bulk actions" onClick={() => setSheet('more')} className="h-11 w-11 justify-center text-h4">
@@ -152,8 +155,8 @@ export default function BulkBar({ phone, count, matched, allMatched, onSelectAll
               onDone={() => setSheet(null)}
               items={[
                 ...(!allMatched && matched > count ? [{ key: 'all', label: `Select all ${matched} matched`, onSelect: onSelectAllMatched }] : []),
-                { key: 'zip', label: 'Download ZIP', onSelect: onZip, disabled: busy },
-                { key: 'an', label: 'Re-analyze', hint: 'keeps your BPM/key', onSelect: onReanalyze, disabled: busy },
+                { key: 'zip', label: 'Download ZIP', onSelect: onZip, disabled: busy || !count },
+                { key: 'an', label: 'Re-analyze', hint: 'keeps your BPM/key', onSelect: onReanalyze, disabled: busy || !count },
                 { key: 'clear', label: 'Clear selection', onSelect: onClear },
               ]}
             />
