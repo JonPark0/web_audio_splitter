@@ -277,7 +277,9 @@ export function reducer(state, action) {
  *   - failures retry with backoff (1 s .. 30 s) and are reported via onError;
  *   - unsaved edits are mirrored to a local draft (offered back on open);
  *   - pagehide / tab hidden flushes with a keepalive PUT; beforeunload asks
- *     while anything is unsaved.
+ *     while anything is unsaved. That PUT's failures (offline, 409) can't be
+ *     shown while hidden, so coming back runs the normal save, whose retry /
+ *     conflict UI then appears.
  *
  * History: every edit pushes the previous document onto `past` (capped);
  * undo/redo swap documents and bump `rev` like any edit. Continuous gestures
@@ -371,9 +373,21 @@ export default function useProjectState({ onError } = {}) {
         }
       } catch (err) {
         const status = err?.response?.status;
-        if (status === 409 && err.response.data?.project && stateRef.current.project?.id === project.id) {
+        const theirs = status === 409 && err.response.data?.project ? normalizeProject(err.response.data.project) : null;
+        if (theirs && Number.isInteger(theirs.version) && sameDocument(theirs, project)) {
+          // The "other" save is this very document: the keepalive PUT from
+          // when the page was hidden landed, its response didn't. Saved.
+          baseVersionRef.current = theirs.version;
+          savedRevRef.current = Math.max(savedRevRef.current, rev);
+          setSaveError(null);
+          if (isDirty()) setSaveStatus('pending');
+          else {
+            setSaveStatus('saved');
+            clearDraft(project.id);
+          }
+        } else if (theirs && stateRef.current.project?.id === project.id) {
           // Someone else saved first. Stop here: the user decides.
-          setConflict({ project: normalizeProject(err.response.data.project) });
+          setConflict({ project: theirs });
           setSaveStatus('conflict');
           setSaveError(err.response.data.detail || 'Changed in another tab');
           againRef.current = false;
@@ -451,8 +465,15 @@ export default function useProjectState({ onError } = {}) {
         });
       inFlightRef.current = run;
     };
+    // Back from another app / tab: whatever the hidden flush couldn't save
+    // (offline, 409, killed request) goes through saveNow, so a failure shows
+    // its retry / conflict UI instead of staying silent.
+    const resume = () => {
+      if (isDirty() && !conflictRef.current) saveNowRef.current();
+    };
     const onVisibility = () => {
       if (document.visibilityState === 'hidden') flush();
+      else resume();
     };
     const onBeforeUnload = (e) => {
       if (isDirty() || inFlightRef.current || conflictRef.current) {
@@ -461,10 +482,12 @@ export default function useProjectState({ onError } = {}) {
       }
     };
     window.addEventListener('pagehide', flush);
+    window.addEventListener('pageshow', resume); // back/forward cache restore
     document.addEventListener('visibilitychange', onVisibility);
     window.addEventListener('beforeunload', onBeforeUnload);
     return () => {
       window.removeEventListener('pagehide', flush);
+      window.removeEventListener('pageshow', resume);
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('beforeunload', onBeforeUnload);
     };
