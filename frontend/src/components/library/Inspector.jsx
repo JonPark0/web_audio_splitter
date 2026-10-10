@@ -11,7 +11,6 @@ import RowError from './RowError';
 import { PlayGlyph } from './SampleRow';
 import TagEditor from './TagEditor';
 import Waveform from './Waveform';
-import { downloadAsNamed } from './download';
 import { downloadName, formatDuration, formatSource } from './format';
 import { COARSE } from './ui';
 
@@ -59,6 +58,7 @@ export default function Inspector({
   project,
   ctx,
   onHide,
+  keys = true,
 }) {
   const jobName = useJobName(sample?.source?.task_id);
 
@@ -66,21 +66,24 @@ export default function Inspector({
     return (
       <div className="flex flex-col gap-3 py-3 text-caption">
         <p className="m-0 text-muted">Select a sample to edit it here.</p>
-        <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
-          {[
-            ['↑ ↓', 'select (plays with Auto on)'],
-            ['Space', 'play / stop'],
-            ['Enter', 'rename'],
-            ['Del', 'delete'],
-            ['L', 'loop'],
-            ['Shift-click', 'check a range'],
-          ].map(([k, v]) => (
-            <React.Fragment key={k}>
-              <dt className="tabular-nums">{k}</dt>
-              <dd className="m-0 text-muted">{v}</dd>
-            </React.Fragment>
-          ))}
-        </dl>
+        {/* keyboard hints, unless there's only a touchscreen */}
+        {keys && (
+          <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
+            {[
+              ['↑ ↓', 'select (plays with Auto on)'],
+              ['Space', 'play / stop'],
+              ['Enter', 'rename'],
+              ['Del', 'delete'],
+              ['L', 'loop'],
+              ['Shift-click', 'check a range'],
+            ].map(([k, v]) => (
+              <React.Fragment key={k}>
+                <dt className="tabular-nums">{k}</dt>
+                <dd className="m-0 text-muted">{v}</dd>
+              </React.Fragment>
+            ))}
+          </dl>
+        )}
       </div>
     );
   }
@@ -133,7 +136,7 @@ export default function Inspector({
 
       <BpmControl sample={sample} busy={busy} onPatch={patch} />
       <KeyControl sample={sample} busy={busy} onPatch={patch} camelot={camelot} />
-      <TagEditor sample={sample} busy={busy} onPatch={patch} allTags={allTags} />
+      <TagEditor key={id} sample={sample} onPatch={patch} allTags={allTags} />
 
       <div className="flex flex-wrap items-baseline gap-x-4 text-caption">
         {status && (
@@ -172,7 +175,7 @@ export default function Inspector({
           as="a"
           href={sampleAudioUrl(sample)}
           download={downloadName(sample)}
-          onClick={(e) => downloadAsNamed(e, sampleAudioUrl(sample), downloadName(sample))}
+          onClick={(e) => ctx.download(e, sample)}
           title={downloadName(sample)}
           className={COARSE}
         >

@@ -12,7 +12,8 @@ import Waveform from './Waveform';
 export default function NowPlaying({ sample, loading, audioRef, onStop, onSeek, loop, onLoop, sync, onSync, syncLabel }) {
   if (!sample) return null;
   return (
-    <div className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-paper pb-[env(safe-area-inset-bottom)]">
+    // safe insets: a landscape phone's notch / rounded corners
+    <div className="pl-safe-inset pr-safe-inset fixed inset-x-0 bottom-0 z-30 border-t border-line bg-paper pb-[env(safe-area-inset-bottom)]">
       <div className="flex h-14 items-center gap-1 px-2">
         <TextButton label="" onClick={onStop} aria-label={`Stop ${sample.name}`} current className="h-11 w-11 shrink-0 justify-center text-h4">
           <PlayGlyph playing loading={loading} />

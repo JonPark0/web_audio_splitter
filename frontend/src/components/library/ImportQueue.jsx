@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { FiX } from 'react-icons/fi';
+import { isComposing } from '../../keys';
 import { errorMessage, importSample, updateSample } from '../../samplesApi';
 import TextButton from '../TextButton';
 import { TagDatalist, parseTags } from './TagEditor';
@@ -78,6 +79,9 @@ export function useImportQueue({ onImported, onPatched, onDrained }) {
 
   const rename = useCallback((id, name) => update(id, { name }), []);
 
+  // Back into the queue (the server was busy, the network dropped...).
+  const retry = useCallback((id) => update(id, { status: 'queued', progress: 0, error: null }), []);
+
   const clear = useCallback(() => {
     setItems((prev) => prev.filter((it) => it.status === 'queued' || it.status === 'uploading' || it.status === 'processing'));
   }, []);
@@ -104,7 +108,7 @@ export function useImportQueue({ onImported, onPatched, onDrained }) {
     [items]
   );
 
-  return { items, busy, addFiles, cancel, rename, clear, batchTags, setBatchTags };
+  return { items, busy, addFiles, cancel, rename, retry, clear, batchTags, setBatchTags };
 }
 
 const STATUS_TEXT = {
@@ -116,7 +120,7 @@ const STATUS_TEXT = {
 
 /** The queue, in flow under the toolbar while there's anything in it. */
 export function ImportPanel({ queue, allTags }) {
-  const { items, busy, cancel, rename, clear, batchTags, setBatchTags } = queue;
+  const { items, busy, cancel, rename, retry, clear, batchTags, setBatchTags } = queue;
   const [tagDraft, setTagDraft] = useState('');
   const listId = useId();
   if (!items.length) return null;
@@ -144,7 +148,8 @@ export function ImportPanel({ queue, allTags }) {
             onBlur={commitTags}
             onKeyDown={(e) => {
               e.stopPropagation();
-              if (e.key === 'Enter') commitTags();
+              // the Enter that ends an IME composition isn't a commit
+              if (e.key === 'Enter' && !isComposing(e)) commitTags();
             }}
             placeholder="optional"
             className={`ainput w-48 !pb-0.5 ${TOUCH_TEXT}`}
@@ -159,7 +164,7 @@ export function ImportPanel({ queue, allTags }) {
       </div>
       <ul className="m-0 mt-1 list-none p-0">
         {items.map((it) => (
-          <li key={it.id} className="flex min-h-8 items-center gap-3 text-caption coarse:min-h-11">
+          <li key={it.id} className="flex min-h-8 flex-wrap items-center gap-x-3 text-caption coarse:min-h-11">
             {it.status === 'queued' ? (
               <input
                 type="text"
@@ -181,8 +186,8 @@ export function ImportPanel({ queue, allTags }) {
                 style={{ width: `${Math.round((it.status === 'done' ? 1 : it.progress) * 100)}%` }}
               />
             </span>
-            <span className={`w-28 shrink-0 truncate text-right tabular-nums ${it.status === 'failed' ? '' : 'text-muted'}`} role={it.status === 'failed' ? 'alert' : undefined} title={it.error || undefined}>
-              {it.status === 'uploading' ? `${Math.round(it.progress * 100)}%` : it.status === 'failed' ? `Failed — ${it.error}` : STATUS_TEXT[it.status]}
+            <span className={`w-28 shrink-0 truncate text-right tabular-nums ${it.status === 'failed' ? '' : 'text-muted'}`}>
+              {it.status === 'uploading' ? `${Math.round(it.progress * 100)}%` : it.status === 'failed' ? 'Failed' : STATUS_TEXT[it.status]}
             </span>
             {it.status === 'queued' || it.status === 'uploading' ? (
               <button
@@ -194,8 +199,18 @@ export function ImportPanel({ queue, allTags }) {
               >
                 <FiX className="icon" strokeWidth={1.5} aria-hidden="true" />
               </button>
+            ) : it.status === 'failed' ? (
+              <TextButton onClick={() => retry(it.id)} aria-label={`Retry ${it.file.name}`} className={`shrink-0 ${COARSE}`}>
+                Retry
+              </TextButton>
             ) : (
               <span className="h-6 w-6 shrink-0 coarse:w-11" />
+            )}
+            {/* its own line, not a truncated tooltip: touch has no hover */}
+            {it.error && (
+              <span role="alert" className="basis-full pb-1">
+                {it.error}
+              </span>
             )}
           </li>
         ))}
