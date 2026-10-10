@@ -85,9 +85,12 @@ export function formatBarBeat(beat, beatsPerBar) {
   return `${bar}.${rest}`;
 }
 
-/** Inverse of formatBarBeat: "3.2" -> beat 9 (4/4); "3" -> bar 3. null if invalid. */
+/**
+ * Inverse of formatBarBeat: "3.2" -> beat 9 (4/4); "3" -> bar 3. null if
+ * invalid. Commas count as dots ("3,2", "3,2,5"): European keypads have no '.'.
+ */
 export function parseBarBeat(text, beatsPerBar) {
-  const m = String(text).trim().match(/^(\d+)(?:\.(\d+(?:\.\d+)?))?$/);
+  const m = String(text).trim().replace(/,/g, '.').match(/^(\d+)(?:\.(\d+(?:\.\d+)?))?$/);
   if (!m) return null;
   const bar = Number(m[1]);
   const beat = m[2] === undefined ? 1 : Number(m[2]);
