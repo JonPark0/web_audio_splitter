@@ -13,10 +13,11 @@ import {
 } from '../project';
 import ClipView from './ClipView';
 import Playhead from './Playhead';
+import { dragSession, followPointer, releaseFocus } from './pointerDrag';
 import Ruler from './Ruler';
 import { SAMPLE_MIME, sampleDrag } from './sampleDrag';
 import TrackHeader from './TrackHeader';
-import { NEW_TRACK_ROW_HEIGHT, RULER_HEIGHT, beatToPx, clampZoom, pxToBeat, snapBeat } from './snap';
+import { NEW_TRACK_ROW_HEIGHT, RULER_HEIGHT, RULER_HEIGHT_TOUCH, beatToPx, clampZoom, pxToBeat, snapBeat } from './snap';
 
 const DRAG_THRESHOLD_PX = 3;
 const TOUCH_SLOP_PX = 8; // finger movement that still counts as a tap / press
@@ -27,7 +28,8 @@ const CLIP_INSET = 2; // px gap above/below a clip inside its lane
 const WHEEL_ZOOM_SPEED = 0.0015; // per wheel pixel: ~100px notch = x1.16
 const WHEEL_LINE_PX = 16; // deltaMode 1 (lines) -> pixels
 const MOUSE_HANDLE_PX = 6; // trim handle inside the clip edge (mouse)
-const TOUCH_HANDLE_PX = 24; // trim handle outside the clip edge (touch), >= 22 px
+const TOUCH_HANDLE_PX = 44; // trim handle hit area (touch); the drawn bar stays 3 px
+const TOUCH_HANDLE_MIN_OUT_PX = 12; // less room than this outside an edge: the handle goes inside
 
 // Grid in palette colours only: bar lines `line`, beat lines `wash`.
 function gridStyle(pxPerBeat, beatsPerBar) {
@@ -43,6 +45,22 @@ const OVERLAP_STYLE = {
 };
 
 /**
+ * Free px beside a clip's edges [x0, x1] on its track: up to the nearest
+ * other clip, and on the left at most to beat 0. `span(c)` = [start, end] px.
+ */
+function edgeRoom(track, id, x0, x1, span) {
+  let before = x0;
+  let after = Infinity;
+  for (const c of track.clips) {
+    if (c.id === id) continue;
+    const [s, e] = span(c);
+    if (s < x0) before = Math.min(before, Math.max(0, x0 - e));
+    if (e > x1) after = Math.min(after, Math.max(0, s - x1));
+  }
+  return { before, after };
+}
+
+/**
  * Track headers + ruler + lanes in ONE scroll container (both axes): the
  * ruler row is `sticky top-0`, the header column `sticky left-0`, so they
  * line up with the lanes by construction and the page never scrolls
@@ -56,7 +74,14 @@ const OVERLAP_STYLE = {
  *   touch  - a swipe scrolls (also when it starts on a clip); long-press a
  *            clip (300 ms) to drag it, long-press an empty lane for a
  *            selection box; trim handles sit outside the selected clip;
- *            two fingers pinch-zoom.
+ *            two fingers pinch-zoom. With an armed sample a tap places it.
+ *   pen    - like the mouse, but holds the scroll for the whole drag.
+ *
+ * One drag at a time, owned by the pointer that started it: other fingers
+ * never move it, and pinch, touch scrolling and Follow wait until it ends.
+ * Drags auto-scroll at the edges and track the content, not the screen, so
+ * a scroll or zoom under a still pointer keeps the clip under it. Escape
+ * cancels.
  */
 export default function Timeline({
   project,
@@ -100,8 +125,10 @@ export default function Timeline({
   const [band, setBand] = useState(null); // {x0, y0, x1, y1, ids}
   const [dropHint, setDropHint] = useState(null); // {trackIndex, beat, beats}
   const [ghost, setGhost] = useState(null); // armed-sample placement preview {trackIndex, beat}
-  const [pressing, setPressing] = useState(null); // clip id under a long-press about to lift
-  const gesture = useRef({ lockScroll: false, pinching: false });
+  // owner: the drag holding the timeline (blocks touch scroll and pinch,
+  // pauses Follow); pinching: two fingers down; pointer: last pointerType.
+  const gesture = useRef({ owner: null, pinching: false, pointer: 'mouse' });
+  const rulerHeight = coarse ? RULER_HEIGHT_TOUCH : RULER_HEIGHT;
 
   const { tracks, samples = {}, bpm } = project;
   const beatsPerBar = project.beats_per_bar || 4;
@@ -111,7 +138,40 @@ export default function Timeline({
 
   // Latest values for the stable handlers below (memoized clips).
   const live = useRef({});
-  live.current = { project, pxPerBeat, step, selection, lane, onSelectClips, onMoveClips, onPatchClip, armedSample };
+  live.current = {
+    project,
+    pxPerBeat,
+    step,
+    selection,
+    lane,
+    headerWidth,
+    rulerHeight,
+    onSelectClips,
+    onMoveClips,
+    onPatchClip,
+    armedSample,
+  };
+
+  /** The timeline for one drag: a release function, or null while another drag owns it. */
+  const claim = useCallback(() => {
+    const g = gesture.current;
+    if (g.owner) return null;
+    const token = {};
+    g.owner = token;
+    return () => {
+      if (g.owner === token) g.owner = null;
+    };
+  }, []);
+  const held = useCallback(() => gesture.current.owner !== null, []);
+  // A drag session (pointerDrag.js): its edges auto-scroll inside the
+  // pinned header column and ruler row.
+  const session = useCallback(
+    (onMove, axes) => {
+      const inset = { left: live.current.headerWidth, top: live.current.rulerHeight };
+      return dragSession({ scroller: scrollRef.current, claim, inset, axes }, onMove);
+    },
+    [claim]
+  );
 
   // Width: at least 32 bars, the content plus 8 bars of room, the loop, and
   // whatever the viewport shows (so the grid never stops short).
@@ -128,7 +188,26 @@ export default function Timeline({
   }, [viewWidth, onViewWidth]);
 
   const endBeat = useMemo(() => projectEndBeat(project), [project]);
-  const contentBeats = Math.max(endBeat + TAIL_BARS * beatsPerBar, MIN_BARS * beatsPerBar, (loop?.end_beat || 0) + beatsPerBar);
+  // A drag past the end grows the timeline ahead of it, so the edge
+  // auto-scroll can keep going.
+  const dragEnd = useMemo(() => {
+    if (!drag) return 0;
+    let end = 0;
+    for (const t of tracks) {
+      for (const c of t.clips) {
+        if (drag.type === 'move' ? !drag.ids.has(c.id) : drag.id !== c.id) continue;
+        const shown = drag.type === 'move' ? { ...c, start_beat: c.start_beat + drag.dBeat } : { ...c, ...drag.patch };
+        end = Math.max(end, clipEndBeat(shown, samples[c.sample_id], bpm));
+      }
+    }
+    return end;
+  }, [drag, tracks, samples, bpm]);
+  const contentBeats = Math.max(
+    endBeat + TAIL_BARS * beatsPerBar,
+    MIN_BARS * beatsPerBar,
+    (loop?.end_beat || 0) + beatsPerBar,
+    dragEnd + TAIL_BARS * beatsPerBar
+  );
   const viewBeats = pxToBeat(Math.max(0, viewWidth), pxPerBeat);
   const totalBeats = Math.ceil(Math.max(contentBeats, viewBeats) / beatsPerBar) * beatsPerBar;
   const width = beatToPx(totalBeats, pxPerBeat);
@@ -173,14 +252,18 @@ export default function Timeline({
     [headerWidth, onZoomTo]
   );
 
-  // Native listeners: wheel (Ctrl/Cmd zoom, Shift horizontal), and touch
-  // (pinch zoom; blocking the scroll once a long-press drag has started).
+  // Native listeners: wheel (Ctrl/Cmd zoom, Shift horizontal), touch (pinch
+  // zoom; blocking the scroll while a drag owns the timeline) and Safari's
+  // gesture events (trackpad pinch).
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return undefined;
+    const g = gesture.current;
+    let trackpad = null; // Safari trackpad pinch {z0}
     const onWheel = (e) => {
       if (e.ctrlKey || e.metaKey) {
         e.preventDefault();
+        if (trackpad) return; // already zooming through gesturechange
         const delta = e.deltaY * (e.deltaMode === 1 ? WHEEL_LINE_PX : e.deltaMode === 2 ? el.clientHeight : 1);
         const from = pendingZoom.current ?? live.current.pxPerBeat;
         zoomAround(from * Math.exp(-delta * WHEEL_ZOOM_SPEED), e.clientX);
@@ -193,8 +276,11 @@ export default function Timeline({
     const dist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
     const onTouchStart = (e) => {
       if (e.touches.length >= 2) {
-        gesture.current.pinching = true;
-        pinch = { d0: dist(e.touches) || 1, z0: live.current.pxPerBeat };
+        g.pinching = true;
+        trackpad = null;
+        // A drag under way keeps its finger; the second one doesn't zoom
+        // (pxPerBeat would change under the drag's maths).
+        pinch = g.owner ? null : { d0: dist(e.touches) || 1, z0: live.current.pxPerBeat };
       }
     };
     const onTouchMove = (e) => {
@@ -202,50 +288,71 @@ export default function Timeline({
         e.preventDefault();
         const mid = (e.touches[0].clientX + e.touches[1].clientX) / 2;
         zoomAround(pinch.z0 * (dist(e.touches) / pinch.d0), mid);
-      } else if (gesture.current.lockScroll) {
+      } else if (g.owner) {
         e.preventDefault();
       }
     };
     const onTouchEnd = (e) => {
       if (e.touches.length < 2) {
         pinch = null;
-        if (e.touches.length === 0) gesture.current.pinching = false;
+        if (e.touches.length === 0) g.pinching = false;
       }
+    };
+    // Safari: a trackpad pinch is a gesture event, not Ctrl+wheel, and
+    // zoomed the whole page. On iOS two fingers are the touch pinch above.
+    // Like Ctrl+wheel it may zoom under a mouse drag (which tracks beats).
+    const onGestureStart = (e) => {
+      e.preventDefault();
+      trackpad = g.pinching ? null : { z0: pendingZoom.current ?? live.current.pxPerBeat };
+    };
+    const onGestureChange = (e) => {
+      e.preventDefault();
+      if (trackpad && e.scale > 0) zoomAround(trackpad.z0 * e.scale, e.clientX);
+    };
+    const onGestureEnd = (e) => {
+      e.preventDefault();
+      trackpad = null;
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     el.addEventListener('touchstart', onTouchStart, { passive: true });
     el.addEventListener('touchmove', onTouchMove, { passive: false });
     el.addEventListener('touchend', onTouchEnd, { passive: true });
     el.addEventListener('touchcancel', onTouchEnd, { passive: true });
+    el.addEventListener('gesturestart', onGestureStart);
+    el.addEventListener('gesturechange', onGestureChange);
+    el.addEventListener('gestureend', onGestureEnd);
     return () => {
       el.removeEventListener('wheel', onWheel);
       el.removeEventListener('touchstart', onTouchStart);
       el.removeEventListener('touchmove', onTouchMove);
       el.removeEventListener('touchend', onTouchEnd);
       el.removeEventListener('touchcancel', onTouchEnd);
+      el.removeEventListener('gesturestart', onGestureStart);
+      el.removeEventListener('gesturechange', onGestureChange);
+      el.removeEventListener('gestureend', onGestureEnd);
     };
   }, [zoomAround]);
 
-  const pointAt = useCallback(
-    (clientX, clientY) => {
-      const rect = lanesRef.current.getBoundingClientRect();
-      return {
-        x: clientX - rect.left,
-        y: clientY - rect.top,
-        beat: Math.max(0, pxToBeat(clientX - rect.left, pxPerBeat)),
-        trackIndex: Math.max(0, Math.floor((clientY - rect.top) / lane)),
-      };
-    },
-    [pxPerBeat, lane]
-  );
+  // Lanes coordinates (the rect includes the scroll) at the current zoom.
+  const pointAt = useCallback((clientX, clientY) => {
+    const rect = lanesRef.current.getBoundingClientRect();
+    const { pxPerBeat: ppb, lane: lh } = live.current;
+    return {
+      x: clientX - rect.left,
+      y: clientY - rect.top,
+      beat: Math.max(0, pxToBeat(clientX - rect.left, ppb)),
+      trackIndex: Math.max(0, Math.floor((clientY - rect.top) / lh)),
+    };
+  }, []);
 
   // ---- clip drag planning, shared by mouse and long-press touch ----
   /**
    * Starts a drag on `clip` with `mode` ('move' | 'trimStart' | 'trim' |
-   * 'fadeIn' | 'fadeOut'). Returns { move(clientX, clientY), finish(commit) }.
+   * 'fadeIn' | 'fadeOut'); `lifted` (touch long-press) shows it dragging
+   * at once. Returns { move(clientX, clientY) -> under way?, finish(commit) }.
    */
-  const beginClipDrag = useCallback((clip, mode, x0, y0, shiftKey) => {
-    const { project: p, pxPerBeat: ppb, step: snap, selection: sel, lane: lh } = live.current;
+  const beginClipDrag = useCallback((clip, mode, x0, y0, shiftKey, lifted = false) => {
+    const { project: p, pxPerBeat: ppb0, step: snap, selection: sel, lane: lh } = live.current;
     const trackIndex = p.tracks.findIndex((t) => t.clips.some((c) => c.id === clip.id));
     const wasSelected = sel.includes(clip.id);
     let ids;
@@ -263,15 +370,28 @@ export default function Timeline({
     const sample = p.samples?.[clip.sample_id];
     const spb = 60 / p.bpm;
     const durBeats = clipDurationBeats(clip, sample, p.bpm);
+    // Lanes coordinates and beats, not screen pixels: the view may scroll
+    // (edge auto-scroll, wheel) or zoom (Ctrl+wheel) under a still pointer.
+    const lanesAt = (cx, cy) => {
+      const r = lanesRef.current.getBoundingClientRect();
+      return { x: cx - r.left, y: cy - r.top };
+    };
+    const origin = lanesAt(x0, y0);
+    const beat0 = pxToBeat(origin.x, ppb0);
     let started = false;
     let result = null;
+    if (lifted) {
+      result = { type: 'move', ids: idSet, dBeat: 0, dTrack: 0 };
+      setDrag(result);
+    }
 
     const move = (cx, cy) => {
-      const dx = cx - x0;
-      const dy = cy - y0;
-      if (!started && Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return;
+      const ppb = live.current.pxPerBeat;
+      const pt = lanesAt(cx, cy);
+      const dBeats = pxToBeat(pt.x, ppb) - beat0;
+      const dy = pt.y - origin.y;
+      if (!started && Math.hypot(beatToPx(dBeats, ppb), dy) < DRAG_THRESHOLD_PX) return false;
       started = true;
-      const dBeats = pxToBeat(dx, ppb);
       if (mode === 'move') {
         // Snap where the grabbed clip lands, then move the group by that delta.
         const snapped = snapBeat(clip.start_beat + dBeats, snap);
@@ -291,6 +411,7 @@ export default function Timeline({
         result = { type: 'patch', id: clip.id, patch: { [mode === 'fadeIn' ? 'fade_in_sec' : 'fade_out_sec']: Math.round(sec * 1000) / 1000 } };
       }
       setDrag(result);
+      return true;
     };
 
     const finish = (commit) => {
@@ -322,75 +443,73 @@ export default function Timeline({
     (e, clip, mode) => {
       if (e.button !== 0 || live.current.armedSample) return;
       e.stopPropagation();
+      if (gesture.current.owner) return; // another pointer is dragging
+      // The preventDefault below stops the focus move: commit an open
+      // rename, let go of the Snap select or a fader - otherwise Delete,
+      // arrows and Space keep going to them. (Touch too: iOS never blurs.)
+      releaseFocus(lanesRef.current);
       if (e.pointerType === 'touch' && mode === 'move') {
         // Touch: a swipe must scroll, so the clip only lifts after a still
         // long-press; until then the browser may take the gesture.
         const x0 = e.clientX;
         const y0 = e.clientY;
-        let drag = null;
+        let s = null;
+        let d = null;
         let moved = false;
         const timer = setTimeout(() => {
           if (gesture.current.pinching || moved) return;
-          gesture.current.lockScroll = true;
+          s = session((cx, cy) => d.move(cx, cy));
+          if (!s) return;
           navigator.vibrate?.(8);
-          setPressing(null);
-          drag = beginClipDrag(clip, 'move', x0, y0, false);
+          d = beginClipDrag(clip, 'move', x0, y0, false, true);
         }, LONG_PRESS_MS);
-        setPressing(clip.id);
-        const onMove = (ev) => {
-          if (drag) drag.move(ev.clientX, ev.clientY);
-          else if (Math.hypot(ev.clientX - x0, ev.clientY - y0) > TOUCH_SLOP_PX) {
-            moved = true;
-            clearTimeout(timer);
-            setPressing(null);
-          }
-        };
         const end = (commit) => {
           clearTimeout(timer);
-          setPressing(null);
-          window.removeEventListener('pointermove', onMove);
-          window.removeEventListener('pointerup', onUp);
-          window.removeEventListener('pointercancel', onCancel);
-          gesture.current.lockScroll = false;
-          if (drag) drag.finish(commit);
-          else if (commit && !moved && !gesture.current.pinching) {
+          if (s) {
+            s.end();
+            d.finish(commit);
+          } else if (commit && !moved && !gesture.current.pinching) {
             const p = live.current.project;
             const tid = p.tracks.find((t) => t.clips.some((c) => c.id === clip.id))?.id;
             live.current.onSelectClips([clip.id], tid); // tap selects
           }
         };
-        const onUp = () => end(true);
-        const onCancel = () => end(false);
-        window.addEventListener('pointermove', onMove);
-        window.addEventListener('pointerup', onUp);
-        window.addEventListener('pointercancel', onCancel);
+        followPointer(e, {
+          move: (ev) => {
+            if (s) s.move(ev.clientX, ev.clientY);
+            else if (Math.hypot(ev.clientX - x0, ev.clientY - y0) > TOUCH_SLOP_PX) {
+              moved = true;
+              clearTimeout(timer);
+            }
+          },
+          up: () => end(true),
+          cancel: () => end(false),
+        });
         return;
       }
       e.preventDefault(); // no text selection / native drag
-      // preventDefault also stops the focus move, so commit any open rename
-      // (its blur saves) - otherwise Delete would keep typing into it.
-      if (document.activeElement instanceof HTMLInputElement) document.activeElement.blur();
-      if (e.pointerType === 'touch') gesture.current.lockScroll = true; // handles: no scroll
-      const d = beginClipDrag(clip, mode, e.clientX, e.clientY, e.shiftKey);
-      const onMove = (ev) => d.move(ev.clientX, ev.clientY);
+      // Mouse, pen and touch handles hold the timeline from the start: no
+      // pan under a pen (Safari would cancel the drag), no pinch, no Follow.
+      let d = null;
+      const s = session((cx, cy) => d.move(cx, cy), mode === 'move' ? undefined : { y: false });
+      if (!s) return;
+      d = beginClipDrag(clip, mode, e.clientX, e.clientY, e.shiftKey);
       const finish = (commit) => {
-        window.removeEventListener('pointermove', onMove);
-        window.removeEventListener('pointerup', onUp);
-        window.removeEventListener('pointercancel', onCancel);
-        gesture.current.lockScroll = false;
+        s.end();
         d.finish(commit);
       };
-      const onUp = () => finish(true);
-      const onCancel = () => finish(false);
-      window.addEventListener('pointermove', onMove);
-      window.addEventListener('pointerup', onUp);
-      window.addEventListener('pointercancel', onCancel);
+      followPointer(e, {
+        move: (ev) => s.move(ev.clientX, ev.clientY),
+        up: () => finish(true),
+        cancel: () => finish(false),
+      });
     },
-    [beginClipDrag]
+    [beginClipDrag, session]
   );
 
-  // ---- empty lane: click selects the track; drag (mouse) or long-press
-  // (touch) draws a selection box; with an armed sample, tap places it. ----
+  // ---- empty lane: click selects the track; drag (mouse/pen) or long-press
+  // (touch) draws a selection box; with an armed sample, a click/tap places
+  // it. ----
   const clipsInBox = (x0, y0, x1, y1) => {
     const { project: p, pxPerBeat: ppb, lane: lh } = live.current;
     const b0 = pxToBeat(Math.min(x0, x1), ppb);
@@ -411,39 +530,60 @@ export default function Timeline({
 
   const onLanesPointerDown = (e) => {
     if (e.button !== 0 || e.target.closest('[data-clip],[data-handle]')) return;
+    if (gesture.current.owner) return; // another pointer is dragging
+    releaseFocus(lanesRef.current);
     const start = pointAt(e.clientX, e.clientY);
+    const x0 = e.clientX;
+    const y0 = e.clientY;
     const armed = live.current.armedSample;
-    if (armed) {
-      // Placement: the ghost follows the finger/pointer, release places it.
-      e.preventDefault();
-      const at = (pt) => ({
-        trackIndex: Math.min(pt.trackIndex, tracks.length),
-        beat: snapBeat(pt.beat, step, 'floor'),
+    const at = (pt) => ({
+      trackIndex: Math.min(pt.trackIndex, tracks.length),
+      beat: snapBeat(pt.beat, step, 'floor'),
+    });
+    if (armed && e.pointerType !== 'mouse') {
+      // Touch/pen placement: a swipe still scrolls the lanes; only a tap
+      // (no travel, not taken by the browser) places.
+      let moved = false;
+      followPointer(e, {
+        move: (ev) => {
+          if (Math.hypot(ev.clientX - x0, ev.clientY - y0) > TOUCH_SLOP_PX) moved = true;
+        },
+        up: () => {
+          if (moved || gesture.current.pinching || gesture.current.owner) return;
+          const g = at(start);
+          onPlaceArmed(tracks[g.trackIndex]?.id ?? null, g.beat);
+        },
       });
+      return;
+    }
+    if (armed) {
+      // Mouse placement: the ghost follows the pointer, release places it.
+      e.preventDefault();
+      const s = session((cx, cy) => {
+        setGhost(at(pointAt(cx, cy)));
+        return true;
+      });
+      if (!s) return;
       setGhost(at(start));
-      const onMove = (ev) => setGhost(at(pointAt(ev.clientX, ev.clientY)));
-      const onUp = (ev) => {
-        window.removeEventListener('pointermove', onMove);
-        window.removeEventListener('pointerup', onUp);
-        window.removeEventListener('pointercancel', onCancel);
-        const g = at(pointAt(ev.clientX, ev.clientY));
-        setGhost(null);
-        onPlaceArmed(tracks[g.trackIndex]?.id ?? null, g.beat);
-      };
-      const onCancel = () => {
-        window.removeEventListener('pointermove', onMove);
-        window.removeEventListener('pointerup', onUp);
-        window.removeEventListener('pointercancel', onCancel);
-        setGhost(null);
-      };
-      window.addEventListener('pointermove', onMove);
-      window.addEventListener('pointerup', onUp);
-      window.addEventListener('pointercancel', onCancel);
+      followPointer(e, {
+        move: (ev) => s.move(ev.clientX, ev.clientY),
+        up: (ev) => {
+          s.end();
+          const g = at(pointAt(ev.clientX, ev.clientY));
+          setGhost(null);
+          onPlaceArmed(tracks[g.trackIndex]?.id ?? null, g.beat);
+        },
+        cancel: () => {
+          s.end();
+          setGhost(null);
+        },
+      });
       return;
     }
 
     const shift = e.shiftKey;
     const base = shift ? live.current.selection : [];
+    let s = null; // the box's hold on the timeline (touch: from the long-press)
     let banding = false;
     let moved = false;
     let timer = null;
@@ -451,37 +591,31 @@ export default function Timeline({
       const ids = clipsInBox(start.x, start.y, pt.x, pt.y);
       setBand({ x0: start.x, y0: start.y, x1: pt.x, y1: pt.y, ids: [...new Set([...base, ...ids])] });
     };
+    const boxTo = (cx, cy) => {
+      const pt = pointAt(cx, cy);
+      if (!banding && Math.hypot(pt.x - start.x, pt.y - start.y) < DRAG_THRESHOLD_PX) return false;
+      banding = true;
+      updateBand(pt);
+      return true;
+    };
     if (e.pointerType === 'touch') {
       timer = setTimeout(() => {
         if (moved || gesture.current.pinching) return;
+        s = session(boxTo);
+        if (!s) return;
         banding = true;
-        gesture.current.lockScroll = true;
         navigator.vibrate?.(8);
         updateBand(start);
       }, LONG_PRESS_MS);
     } else {
+      // Mouse and pen: the box starts on drag (a pen holds the scroll).
       e.preventDefault();
+      s = session(boxTo);
+      if (!s) return;
     }
-    const onMove = (ev) => {
-      const pt = pointAt(ev.clientX, ev.clientY);
-      const dist = Math.hypot(pt.x - start.x, pt.y - start.y);
-      if (e.pointerType === 'touch') {
-        if (banding) updateBand(pt);
-        else if (dist > TOUCH_SLOP_PX) {
-          moved = true;
-          clearTimeout(timer);
-        }
-        return;
-      }
-      if (!banding && dist >= DRAG_THRESHOLD_PX) banding = true;
-      if (banding) updateBand(pt);
-    };
     const finish = (commit, ev) => {
       clearTimeout(timer);
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onCancel);
-      gesture.current.lockScroll = false;
+      s?.end();
       if (banding) {
         const pt = ev ? pointAt(ev.clientX, ev.clientY) : start;
         const ids = [...new Set([...base, ...clipsInBox(start.x, start.y, pt.x, pt.y)])];
@@ -492,11 +626,17 @@ export default function Timeline({
       setBand(null);
       if (commit && !moved && !gesture.current.pinching) onSelectClips(shift ? base : [], tracks[start.trackIndex]?.id);
     };
-    const onUp = (ev) => finish(true, ev);
-    const onCancel = () => finish(false);
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onCancel);
+    followPointer(e, {
+      move: (ev) => {
+        if (s) s.move(ev.clientX, ev.clientY);
+        else if (Math.hypot(ev.clientX - x0, ev.clientY - y0) > TOUCH_SLOP_PX) {
+          moved = true;
+          clearTimeout(timer);
+        }
+      },
+      up: (ev) => finish(true, ev),
+      cancel: () => finish(false),
+    });
   };
 
   // ---- sample drop from the browser (HTML5 drag and drop, mouse) ----
@@ -535,7 +675,19 @@ export default function Timeline({
   const hasClips = tracks.some((t) => t.clips.length > 0);
   const clipHeight = lane - CLIP_INSET * 2;
   const bandSet = band ? new Set(band.ids) : null;
-  const showTouchHandles = coarse;
+  // Hidden while clips move (they reappear on the dropped clip).
+  const showTouchHandles = coarse && drag?.type !== 'move';
+
+  const overlaps = useMemo(() => findOverlaps(project), [project]);
+  const overlapping = useMemo(() => {
+    const ids = new Set();
+    for (const o of overlaps) {
+      for (const c of tracks[o.trackIndex].clips) {
+        if (c.start_beat < o.end && clipEndBeat(c, samples[c.sample_id], bpm) > o.start) ids.add(c.id);
+      }
+    }
+    return ids;
+  }, [overlaps, tracks, samples, bpm]);
 
   const clipViews = [];
   const handles = [];
@@ -575,7 +727,7 @@ export default function Timeline({
           selected={selected}
           dimmed={dimmed}
           dragging={dragging}
-          pressing={pressing === clip.id}
+          overlapping={overlapping.has(clip.id)}
           pending={pending?.has(clip.id)}
           coarse={coarse}
           handlePx={MOUSE_HANDLE_PX}
@@ -584,9 +736,22 @@ export default function Timeline({
         />
       );
       // Touch trim handles: only on the selected clip, OUTSIDE its edges so a
-      // narrow one-shot stays grabbable by its body.
+      // narrow one-shot stays grabbable by its body - but never over a
+      // neighbour (it would block its long-press) or left of beat 0 (under
+      // the track headers): what doesn't fit outside goes inside the edge.
       if (showTouchHandles && selectedSet.has(clip.id) && selection.length <= 4) {
+        const room = edgeRoom(track, clip.id, left, left + w, (c) => [
+          beatToPx(c.start_beat, pxPerBeat),
+          beatToPx(clipEndBeat(c, samples[c.sample_id], bpm), pxPerBeat),
+        ]);
         for (const side of ['trimStart', 'trim']) {
+          const free = side === 'trim' ? room.after : room.before;
+          const out = free >= TOUCH_HANDLE_MIN_OUT_PX ? Math.min(TOUCH_HANDLE_PX, free) : 0;
+          const inside = Math.min(TOUCH_HANDLE_PX - out, Math.floor(w / 3));
+          const hw = out + inside;
+          if (hw < 4) continue;
+          // The drawn bar sits just outside the edge (inside when there's no room).
+          const bar = side === 'trim' ? (out ? inside : hw - 3) : out ? out - 3 : 0;
           handles.push(
             <div
               key={`${clip.id}-${side}`}
@@ -595,17 +760,10 @@ export default function Timeline({
               aria-label={side === 'trim' ? 'Trim clip end' : 'Trim clip start'}
               aria-valuenow={Math.round((side === 'trim' ? shown.start_beat + beats : shown.start_beat) * 100) / 100}
               onPointerDown={(e) => onClipPointerDown(e, clip, side)}
-              className="absolute z-20 flex items-center"
-              style={{
-                left: side === 'trim' ? left + w : left - TOUCH_HANDLE_PX,
-                top,
-                width: TOUCH_HANDLE_PX,
-                height: clipHeight,
-                touchAction: 'none',
-                justifyContent: side === 'trim' ? 'flex-start' : 'flex-end',
-              }}
+              className="absolute z-20"
+              style={{ left: side === 'trim' ? left + w - inside : left - out, top, width: hw, height: clipHeight, touchAction: 'none' }}
             >
-              <span className="block h-1/2 w-[3px] bg-ink" />
+              <span className="absolute top-1/4 block h-1/2 w-[3px] bg-ink" style={{ left: bar }} />
             </div>
           );
         }
@@ -613,7 +771,6 @@ export default function Timeline({
     }
   });
 
-  const overlaps = useMemo(() => findOverlaps(project), [project]);
   const loopShown = loop && loop.enabled && loop.end_beat > loop.start_beat;
   const markers = project.markers || [];
 
@@ -621,20 +778,26 @@ export default function Timeline({
     <div
       ref={scrollRef}
       data-timeline=""
-      onContextMenu={(e) => coarse && e.preventDefault()}
+      onPointerDownCapture={(e) => {
+        gesture.current.pointer = e.pointerType;
+      }}
+      // No native menu on a long-press (also on a touch laptop, whose mouse
+      // keeps its right-click menu).
+      onContextMenu={(e) => (e.nativeEvent.pointerType || gesture.current.pointer) !== 'mouse' && e.preventDefault()}
       className="relative isolate min-w-0 select-none overflow-auto overscroll-contain border-y border-line [-webkit-touch-callout:none]"
       style={{ height, touchAction: 'pan-x pan-y' }}
     >
       <div className="relative" style={{ width: headerWidth + width, minWidth: '100%' }}>
         {/* Ruler row, pinned to the top while the lanes scroll under it */}
-        <div className="sticky top-0 z-30 flex bg-paper" style={{ height: RULER_HEIGHT }}>
+        <div className="sticky top-0 z-30 flex bg-paper" style={{ height: rulerHeight }}>
           <div
             className="sticky left-0 z-10 flex shrink-0 items-end border-b border-r border-b-ink border-r-line bg-paper px-2 pb-1 text-caption text-muted"
             style={{ width: headerWidth }}
           >
             {mode === 'phone' ? `${tracks.length}` : `${tracks.length} ${tracks.length === 1 ? 'track' : 'tracks'}`}
           </div>
-          <div className="relative" style={{ width }}>
+          {/* Own stacking context: loop handles and flags stay under the corner cell */}
+          <div className="relative isolate" style={{ width }}>
             <Ruler
               pxPerBeat={pxPerBeat}
               beatsPerBar={beatsPerBar}
@@ -643,6 +806,9 @@ export default function Timeline({
               step={step}
               markers={markers}
               coarse={coarse}
+              scrollRef={scrollRef}
+              headerWidth={headerWidth}
+              claim={claim}
               onSeek={onSeek}
               onLoopChange={onLoopChange}
               onRenameMarker={onRenameMarker}
@@ -679,7 +845,9 @@ export default function Timeline({
             </div>
           </div>
 
-          {/* Lanes: x = 0 is beat 0 */}
+          {/* Lanes: x = 0 is beat 0. Their own stacking context, so the
+              playhead, a dragged clip, handles, ghost and box (z-10..30
+              inside) never paint over - or take taps from - the headers. */}
           <div
             ref={lanesRef}
             data-lanes=""
@@ -687,8 +855,8 @@ export default function Timeline({
             onDragOver={onDragOver}
             onDragLeave={onDragLeave}
             onDrop={onDrop}
-            className={`relative ${armedSample ? 'cursor-copy' : ''}`}
-            style={{ width, height: lanesHeight, touchAction: armedSample ? 'none' : undefined }}
+            className={`relative isolate ${armedSample ? 'cursor-copy' : ''}`}
+            style={{ width, height: lanesHeight }}
           >
             {tracks.map((track, i) => (
               <div
@@ -726,7 +894,7 @@ export default function Timeline({
 
             {!hasClips && tracks.length > 0 && !dropHint && !ghost && (
               <p className="pointer-events-none absolute left-3 m-0 text-caption text-ink" style={{ top: lane / 2 - 10 }}>
-                {coarse ? 'Open Samples (⋯), tap one, then tap a lane.' : 'Drag samples from the browser onto a track.'}
+                {coarse ? 'Pick a sample in Samples, then tap a lane.' : 'Drag samples from the browser onto a track.'}
               </p>
             )}
 
@@ -737,8 +905,7 @@ export default function Timeline({
               <div
                 // eslint-disable-next-line react/no-array-index-key
                 key={i}
-                aria-label="Overlapping clips"
-                title="Overlapping clips: both play here. Move or trim one."
+                aria-hidden="true"
                 className="pointer-events-none absolute z-10 border-x border-ink"
                 style={{
                   ...OVERLAP_STYLE,
@@ -796,7 +963,7 @@ export default function Timeline({
                 );
               })()}
 
-            <Playhead clock={clock} pxPerBeat={pxPerBeat} scrollRef={scrollRef} headerWidth={headerWidth} follow={follow} />
+            <Playhead clock={clock} pxPerBeat={pxPerBeat} scrollRef={scrollRef} headerWidth={headerWidth} follow={follow} held={held} />
           </div>
         </div>
       </div>
