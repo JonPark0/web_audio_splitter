@@ -8,11 +8,18 @@ import Waveform from './Waveform';
 import { formatBpm, formatKey, formatLength } from './format';
 import { COARSE } from './ui';
 
-// Column tracks, shared with the header so they line up.
+// Column tracks, shared with the header so they line up. The desktop grid
+// with any touch input (iPad Pro, touch laptop) widens the checkbox, ▶ and
+// ⋯ columns to the 44 px their targets grow to there - in 28/32 px columns
+// they spilled into each other.
 export const GRID = {
-  desktop: 'grid-cols-[28px_32px_120px_minmax(0,1fr)_60px_60px_96px_minmax(0,11rem)_32px]',
+  desktop:
+    'grid-cols-[28px_32px_120px_minmax(0,1fr)_60px_60px_96px_minmax(0,11rem)_32px] coarse:grid-cols-[44px_44px_120px_minmax(0,1fr)_60px_60px_96px_minmax(0,11rem)_44px]',
   tablet: 'grid-cols-[44px_44px_88px_minmax(0,1fr)_52px_88px_44px]',
 };
+
+// The checkbox's cell (a <label>) is the target: 44 px on touch.
+export const CHECKBOX = { desktop: 'h-3.5 w-3.5 coarse:h-5 coarse:w-5', tablet: 'h-5 w-5' };
 
 export function PlayGlyph({ playing, loading }) {
   const Icon = playing ? FiSquare : FiPlay;
@@ -78,8 +85,12 @@ export default memo(function SampleRow({
       }}
       onDoubleClick={() => ctx.rowDoubleClick(sample)}
       onFocus={(e) => e.target === e.currentTarget && ctx.rowFocus(sample)}
+      // contain-intrinsic-size = the real height minus the 1 px border, so
+      // rows not yet rendered (scroll restore) take the space they will.
       className={`grid ${GRID[size]} cursor-default items-center border-b border-line outline-offset-[-2px] [content-visibility:auto] ${
-        tablet ? 'min-h-12 [contain-intrinsic-size:auto_47px]' : 'min-h-9 [contain-intrinsic-size:auto_35px]'
+        tablet
+          ? 'min-h-12 [contain-intrinsic-size:auto_47px]'
+          : 'min-h-9 [contain-intrinsic-size:auto_35px] coarse:[contain-intrinsic-size:auto_44px]'
       } ${selected ? 'bg-wash' : 'hover:bg-wash/60'}`}
     >
       <label role="gridcell" className="flex h-full cursor-pointer items-center justify-center" onClick={(e) => e.stopPropagation()}>
@@ -89,7 +100,7 @@ export default memo(function SampleRow({
           onChange={() => {}}
           onClick={(e) => ctx.toggleCheck(id, e.shiftKey)}
           aria-label={`Select ${sample.name}`}
-          className={`m-0 cursor-pointer ${tablet ? 'h-5 w-5' : 'h-3.5 w-3.5'}`}
+          className={`m-0 cursor-pointer ${CHECKBOX[size]}`}
         />
       </label>
       <div role="gridcell" className="flex justify-center">
@@ -171,7 +182,7 @@ export default memo(function SampleRow({
               title="More"
               onClick={(e) => {
                 e.stopPropagation();
-                ctx.openMenu(sample, e.currentTarget.getBoundingClientRect());
+                ctx.openMenu(sample, e.currentTarget);
               }}
               className={tablet ? 'h-11 w-11 justify-center' : `h-8 w-8 justify-center ${COARSE}`}
             >
@@ -181,7 +192,7 @@ export default memo(function SampleRow({
         </>
       )}
       {error && (
-        <div role="gridcell" className="col-span-full pb-1.5 pl-[60px]">
+        <div role="gridcell" className={`col-span-full pb-1.5 ${tablet ? 'pl-[88px]' : 'pl-[60px] coarse:pl-[88px]'}`}>
           <RowError error={error} onDismiss={() => ctx.dismissError(id)} />
         </div>
       )}

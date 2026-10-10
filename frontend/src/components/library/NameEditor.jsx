@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { isComposing } from '../../keys';
 import { TOUCH_TEXT } from './ui';
 
 /**
@@ -15,21 +16,41 @@ export default function NameEditor({ sample, busy, onPatch, editing: editingProp
   const inputRef = useRef(null);
   // Escape unmounts the input, which fires blur - this stops that blur saving.
   const cancelRef = useRef(false);
+  // Set while the field is open and not yet saved/cancelled.
+  const openRef = useRef(false);
 
   useEffect(() => {
     if (editing) {
       cancelRef.current = false;
+      openRef.current = true;
       setDraft(sample.name);
       requestAnimationFrame(() => inputRef.current?.select());
+    } else {
+      openRef.current = false;
     }
   }, [editing]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const finish = () => {
     setEditing(false);
+    if (!openRef.current) return;
+    openRef.current = false;
     if (cancelRef.current) return;
     const next = draft.trim();
     if (next && next !== sample.name) onPatch({ name: next });
   };
+
+  // Unmounted while open (the sheet closed by a tap that doesn't blur on
+  // iOS, the inspector swapped for a sheet at 1280 px): save, don't drop.
+  // Only once the field has really left the page - StrictMode's rehearsal
+  // unmount runs this too, with the field still there.
+  const finishRef = useRef(finish);
+  finishRef.current = finish;
+  useEffect(
+    () => () => {
+      if (openRef.current && !inputRef.current?.isConnected) finishRef.current();
+    },
+    []
+  );
 
   if (editing) {
     return (
@@ -46,6 +67,7 @@ export default function NameEditor({ sample, busy, onPatch, editing: editingProp
         onBlur={finish}
         onKeyDown={(e) => {
           e.stopPropagation(); // keep list shortcuts (Space, Del, arrows) out
+          if (isComposing(e)) return; // that Enter/Escape belongs to the IME
           if (e.key === 'Enter') {
             e.currentTarget.blur();
           } else if (e.key === 'Escape') {

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { isComposing, parseDecimal } from '../../keys';
 import TextButton from '../TextButton';
 import { BPM_MAX, BPM_MIN } from '../../samplesApi';
 import { bpmSuggestions, formatBpm, roundBpm } from './format';
@@ -50,9 +51,10 @@ export default function BpmControl({ sample, busy, onPatch }) {
       setDraft(toDraft(bpm));
       return;
     }
-    const value = Number(draft);
+    // "92,5" from a European keypad is 92.5
+    const value = parseDecimal(draft);
     // Blank or out-of-range input just reverts; "reset" has its own control.
-    if (draft.trim() === '' || !Number.isFinite(value) || !inRange(value)) {
+    if (!Number.isFinite(value) || !inRange(value)) {
       setDraft(toDraft(bpm));
       return;
     }
@@ -60,8 +62,22 @@ export default function BpmControl({ sample, busy, onPatch }) {
     save(value);
   };
 
+  // Unmounted mid-edit (sheet closed by a tap that doesn't blur on iOS, the
+  // inspector swapped for a sheet at 1280 px): save what was typed. (A
+  // field still in the page is StrictMode's rehearsal.)
+  const fieldRef = useRef(null);
+  const commitRef = useRef(commitDraft);
+  commitRef.current = commitDraft;
+  useEffect(
+    () => () => {
+      if (focusedRef.current && !fieldRef.current?.isConnected) commitRef.current();
+    },
+    []
+  );
+
   const onKeyDown = (e) => {
     e.stopPropagation();
+    if (isComposing(e)) return;
     if (e.key === 'Enter') {
       e.currentTarget.blur();
     } else if (e.key === 'Escape') {
@@ -114,20 +130,21 @@ export default function BpmControl({ sample, busy, onPatch }) {
         <label htmlFor={`bpm-${sample.id}`} className="-mr-1 w-10 shrink-0 text-caption text-muted">
           BPM
         </label>
+        {/* text + decimal keypad, not type=number: that refuses "92,5"
+            and a mouse wheel over the focused field changed the tempo
+            while the inspector scrolled */}
         <input
+          ref={fieldRef}
           id={`bpm-${sample.id}`}
-          type="number"
+          type="text"
           inputMode="decimal"
-          step="0.01"
-          min={BPM_MIN}
-          max={BPM_MAX}
           value={draft}
           placeholder="—"
           disabled={busy}
           onFocus={() => {
             focusedRef.current = true;
           }}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={(e) => setDraft(e.target.value.replace(/[^\d.,]/g, ''))}
           onBlur={commitDraft}
           onKeyDown={onKeyDown}
           className={`ainput w-20 !pb-0.5 tabular-nums ${TOUCH_TEXT}`}
@@ -138,10 +155,14 @@ export default function BpmControl({ sample, busy, onPatch }) {
         <TextButton disabled={busy || !canScale(0.5)} onClick={() => save(scaled(0.5))} title={canScale(0.5) || bpm == null ? 'Halve the tempo' : `Below ${BPM_MIN} BPM`} aria-label="Halve BPM" className={btn}>
           ÷2
         </TextButton>
+        {/* Timed on press, not on click (release): the beat is when the
+            finger lands, and how long it rests there varies tap to tap.
+            Keyboard presses (a click with no pointer, detail 0) still count. */}
         <TextButton
           current={!!tap}
           disabled={busy}
-          onClick={onTap}
+          onPointerDown={(e) => e.button === 0 && onTap()}
+          onClick={(e) => e.detail === 0 && onTap()}
           label="Tap 000.00"
           title="Tap along to the beat; saves 2 s after the last tap"
           className={`tabular-nums ${btn}`}

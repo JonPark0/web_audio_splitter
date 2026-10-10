@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { GRID } from './SampleRow';
+import { CHECKBOX, GRID } from './SampleRow';
 
 // Column → [ascending, descending] backend sort keys.
 const SORTS = {
@@ -55,7 +55,7 @@ export default function TableHeader({ size, sort, onSort, checkState, onCheckAll
           checked={checkState === 'all'}
           onChange={onCheckAll}
           aria-label="Select all loaded samples"
-          className={`m-0 cursor-pointer ${tablet ? 'h-5 w-5' : 'h-3.5 w-3.5'}`}
+          className={`m-0 cursor-pointer ${CHECKBOX[size]}`}
         />
       </label>
       {/* sr-only text inside a cell: an sr-only cell itself would leave the grid flow */}
