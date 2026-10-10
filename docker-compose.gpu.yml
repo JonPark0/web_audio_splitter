@@ -26,6 +26,7 @@ services:
       context: ./backend
       args:
         USE_GPU: ${USE_GPU:-false}
+        PREFETCH_FLASHSR: ${PREFETCH_FLASHSR:-true}
     ports:
       - "8000:8000"
     volumes:

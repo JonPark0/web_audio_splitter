@@ -59,6 +59,19 @@ RUN git init -q /app/apollo \
 ENV PYTHONPATH="/app/apollo:${PYTHONPATH}"
 ENV APOLLO_REPO_ID=JusperLee/Apollo
 
+# Checkpoint downloads have to ride out a slow or stalling link to Hugging
+# Face's CDN: huggingface_hub drops a read after 10 s of silence and gives up
+# after five resumes, which failed whole builds on the multi-hundred-MB
+# FlashSR files. Hence a longer read timeout (kept at runtime too: AudioSR,
+# and FlashSR when its prefetch is skipped, download on first use) and
+# build_retry.sh around each prefetch below; every retry resumes the
+# .incomplete file left in the cache. The sed strips CRLF in case the script
+# was checked out on Windows without .gitattributes.
+ENV HF_HUB_DOWNLOAD_TIMEOUT=120 \
+    HF_HUB_ETAG_TIMEOUT=60
+COPY build_retry.sh /usr/local/bin/retry
+RUN sed -i 's/\r$//' /usr/local/bin/retry && chmod 755 /usr/local/bin/retry
+
 # Prefetch the Apollo checkpoint at build time so the image is self-contained
 # and the first real request isn't a multi-minute cold download.
 #
@@ -81,7 +94,7 @@ ENV APOLLO_REPO_ID=JusperLee/Apollo
 # The three model prefetches (Apollo, FlashSR, BS-Roformer) are deliberately
 # separate RUN steps: each is its own cached layer, so a failed download or an
 # edit to a later one doesn't re-download the earlier multi-hundred-MB ones.
-RUN python -c "\
+RUN retry 5 python -c "\
 from huggingface_hub import hf_hub_download; \
 hf_hub_download(repo_id='JusperLee/Apollo', filename='pytorch_model.bin')"
 
@@ -115,14 +128,22 @@ ENV FLASHSR_REPO_ID=jakeoneijk/FlashSR_weights
 # NOTE: FlashSR_weights is a HF *dataset* repo (huggingface.co/datasets/...),
 # not a model repo — confirmed by an actual build failing with a 401
 # "Repository Not Found" until repo_type="dataset" was added here.
-RUN python -c "\
+# --build-arg PREFETCH_FLASHSR=false (or PREFETCH_FLASHSR=false in .env) skips
+# it for a link that can't fetch them at build time: FlashSR is opt-in, and
+# flashsr_infer.py downloads the same files on its first use.
+ARG PREFETCH_FLASHSR=true
+RUN if [ "$PREFETCH_FLASHSR" = "true" ]; then \
+        retry 5 python -c "\
 from huggingface_hub import hf_hub_download; \
-[hf_hub_download(repo_id='jakeoneijk/FlashSR_weights', filename=f, repo_type='dataset') for f in ('student_ldm.pth', 'sr_vocoder.pth', 'vae.pth')]"
+[hf_hub_download(repo_id='jakeoneijk/FlashSR_weights', filename=f, repo_type='dataset') for f in ('student_ldm.pth', 'sr_vocoder.pth', 'vae.pth')]"; \
+    else \
+        echo "Skipping the FlashSR checkpoint prefetch (PREFETCH_FLASHSR=$PREFETCH_FLASHSR)"; \
+    fi
 
 # Warm BS-Roformer's default model cache at build time too (its own default
 # cache location, not a custom --output-dir, so the runtime CLI finds it
 # without a first-request download).
-RUN python -c "\
+RUN retry 5 python -c "\
 from bs_roformer import DEFAULT_MODEL, ensure_model_assets; \
 ensure_model_assets(DEFAULT_MODEL)"
 
