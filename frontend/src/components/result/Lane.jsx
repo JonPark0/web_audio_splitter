@@ -76,6 +76,9 @@ export default memo(function Lane({
   }
   const handleW = coarse ? 44 : 12;
   const grabH = coarse ? Math.min(44, height - 12) : 14;
+  // A selection narrower than a handle: the handles meet in the middle
+  // instead of overlapping (the end one covered the start one entirely).
+  const inward = selBox ? Math.min(handleW / 2, Math.max(0, selBox.x1 - selBox.x0) / 2) : 0;
 
   return (
     <div
@@ -102,18 +105,18 @@ export default memo(function Lane({
       {selBox && isTarget && (
         <>
           {[
-            ['start', selBox.x0],
-            ['end', selBox.x1],
-          ].map(([edge, x]) =>
+            ['start', selBox.x0, handleW - inward],
+            ['end', selBox.x1, inward],
+          ].map(([edge, x, at]) =>
             x >= -handleW && x <= view.width + handleW ? (
               <div
                 key={edge}
                 data-handle={edge}
                 title={edge === 'start' ? 'Drag the start' : 'Drag the end'}
                 className="rs-handle absolute inset-y-0 z-[2] cursor-ew-resize"
-                style={{ left: x - handleW / 2, width: handleW }}
+                style={{ left: x - at, width: handleW }}
               >
-                <span className="pointer-events-none absolute inset-y-0 left-1/2 w-px bg-ink" />
+                <span className="pointer-events-none absolute inset-y-0 w-px bg-ink" style={{ left: at }} />
               </div>
             ) : null
           )}
@@ -135,16 +138,35 @@ export default memo(function Lane({
         const x1 = xAt(m.end);
         if (x1 < 0 || x0 > view.width) return null;
         const left = Math.max(0, x0);
+        const width = Math.max(4, Math.min(view.width, x1) - left);
+        const tone = m.mix ? 'bg-muted' : 'bg-ink';
+        if (coarse) {
+          // Touch has no hover title: the name is written at the marker's
+          // start, and only that word (44 px tall, under the selection's
+          // strip and handles) is a target, so the rest of the lane keeps
+          // its taps. Tap = select the sample, like a click.
+          return (
+            <React.Fragment key={m.id}>
+              <span aria-hidden="true" className={`pointer-events-none absolute bottom-0 h-[3px] ${tone}`} style={{ left, width }} />
+              <div
+                data-marker={m.id}
+                className="absolute bottom-0 flex items-end pb-1"
+                style={{ left, height: Math.min(44, height), minWidth: 44, maxWidth: Math.max(44, Math.min(160, view.width - left)) }}
+              >
+                <span className="pointer-events-none truncate bg-paper/80 px-1 text-[11px] leading-4 text-muted">{m.name}</span>
+              </div>
+            </React.Fragment>
+          );
+        }
         return (
           <div
             key={m.id}
-            // Touch: markers are just marks (a 44 px target would eat the lane's taps).
-            data-marker={coarse ? undefined : m.id}
-            title={`${m.name} · ${fmtTime(m.start)}–${fmtTime(m.end)} (in the library)${coarse ? '' : ' — click to select'}`}
-            className={`absolute bottom-0 z-[1] ${coarse ? 'pointer-events-none' : 'cursor-pointer'}`}
-            style={{ left, width: Math.max(4, Math.min(view.width, x1) - left), height: 8 }}
+            data-marker={m.id}
+            title={`${m.name} · ${fmtTime(m.start)}–${fmtTime(m.end)} (in the library) — click to select`}
+            className="absolute bottom-0 z-[1] cursor-pointer"
+            style={{ left, width, height: 8 }}
           >
-            <span className={`pointer-events-none absolute inset-x-0 bottom-0 h-[3px] ${m.mix ? 'bg-muted' : 'bg-ink'}`} />
+            <span className={`pointer-events-none absolute inset-x-0 bottom-0 h-[3px] ${tone}`} />
           </div>
         );
       })}

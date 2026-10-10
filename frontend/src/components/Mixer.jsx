@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { FiMinus, FiPlus } from 'react-icons/fi';
 import { getOnsets, trackUrl } from '../api';
+import { isSelect, isTextEntry, shortcutKey } from '../keys';
 import ABToggle from './ABToggle';
 import ExtractPanel, { MIN_SAMPLE_SEC } from './ExtractPanel';
 import TextButton from './TextButton';
@@ -16,7 +17,7 @@ import MixEngine from './result/engine';
 import { clamp, dbToGain, stemLabel } from './result/format';
 import { createPeaksStore } from './result/peaks';
 import { listJobSamples, sampleTracks } from './result/samples';
-import useLaneGestures from './result/useLaneGestures';
+import useLaneGestures, { useZoomGestures } from './result/useLaneGestures';
 import { ZOOM_STEP, createTimeline, useLayoutSize, useTimelineWidth } from './useWaveZoom';
 import './result/result.css';
 
@@ -52,7 +53,7 @@ export default function Mixer({ taskId, result, bpm, songKey, retrying, onRetryT
   );
   const recoveredSet = useMemo(() => new Set(result.recovered_tracks || []), [result]);
   const recTracks = tracks.filter((t) => recoveredSet.has(t));
-  const { size, coarse } = useLayoutSize();
+  const { size, coarse, short } = useLayoutSize();
   const phone = size === 'phone';
   const touchRows = !phone && coarse; // two 44 px lines of controls per row
   const rowH = touchRows ? 88 : size === 'desktop' ? (tracks.length <= 4 ? 96 : 72) : 80;
@@ -420,68 +421,91 @@ export default function Mixer({ taskId, result, bpm, songKey, retrying, onRetryT
   const keyActions = useRef({});
   keyActions.current = { togglePlay, zoomSel, zoomIn, zoomOut, nudge };
   useEffect(() => {
+    // A fader or toggle that was clicked or dragged hands the arrows back to
+    // the selection; one reached with Tab keeps them (keyboard users adjust
+    // it that way).
+    let byPointer = false;
+    let pointerFocused = null;
+    const onPointer = () => {
+      byPointer = true;
+    };
+    const onAnyKey = () => {
+      byPointer = false;
+    };
+    const onFocusIn = (e) => {
+      pointerFocused = byPointer ? e.target : null;
+    };
     const onKey = (e) => {
       if (e.defaultPrevented || e.ctrlKey || e.metaKey) return;
-      const tag = e.target?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target?.isContentEditable) return;
+      // Only typing steps aside: Space still plays after a fader drag or a
+      // toggle click. A focused select keeps Space and the arrows.
+      const target = e.target;
+      const arrow = e.key.startsWith('Arrow');
+      if (isTextEntry(target)) return;
+      if (isSelect(target) && (e.key === ' ' || arrow)) return;
+      if (arrow && target?.tagName === 'INPUT' && target !== pointerFocused) return;
       const a = keyActions.current;
       switch (e.key) {
         case ' ':
           e.preventDefault();
           if (!e.repeat) a.togglePlay();
-          break;
-        case 'z':
-        case 'Z':
-          a.zoomSel();
-          break;
+          return;
         case '+':
         case '=':
           a.zoomIn();
-          break;
+          return;
         case '-':
         case '_':
           a.zoomOut();
-          break;
-        case 'l':
-        case 'L':
-          setLoopOn((v) => !v);
-          break;
+          return;
         case '[':
           setActiveEdge('start');
-          break;
+          return;
         case ']':
           setActiveEdge('end');
-          break;
+          return;
         case 'ArrowLeft':
         case 'ArrowRight': {
-          if (!selRef.current) break;
+          if (!selRef.current) return;
           e.preventDefault();
           const beat = bpm > 0 ? 60 / bpm : null;
           const dt = e.altKey && beat ? beat : e.shiftKey ? 0.01 : 0.001;
           a.nudge(e.key === 'ArrowLeft' ? -dt : dt);
-          break;
+          return;
         }
         case 'Escape':
           if (extractRef.current) setExtract(null);
           else if (selRef.current) setSelectionState(null);
-          break;
+          return;
         default:
       }
+      if (e.altKey) return;
+      // Letters by key position too, so Z and L work with a Hangul or
+      // Cyrillic layout active.
+      const k = shortcutKey(e);
+      if (k === 'z') a.zoomSel();
+      else if (k === 'l') setLoopOn((v) => !v);
     };
-    // Space on a focused button must not also "click" it.
+    // Space on a focused button or toggle must not also "click" it.
     const onKeyUp = (e) => {
-      const tag = e.target?.tagName;
-      if (e.key === ' ' && (tag === 'BUTTON' || tag === 'A' || tag === 'SUMMARY')) e.preventDefault();
+      if (e.key === ' ' && !isTextEntry(e.target) && !isSelect(e.target)) e.preventDefault();
     };
+    window.addEventListener('pointerdown', onPointer, true);
+    window.addEventListener('keydown', onAnyKey, true);
+    document.addEventListener('focusin', onFocusIn);
     window.addEventListener('keydown', onKey);
     window.addEventListener('keyup', onKeyUp);
     return () => {
+      window.removeEventListener('pointerdown', onPointer, true);
+      window.removeEventListener('keydown', onAnyKey, true);
+      document.removeEventListener('focusin', onFocusIn);
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('keyup', onKeyUp);
     };
   }, [bpm]);
 
   // ---- gestures ----------------------------------------------------------------
+  const rootRef = useRef(null);
   const rowsRef = useRef(null);
   const rulerColRef = useRef(null);
   const sheetLaneRef = useRef(null);
@@ -497,6 +521,7 @@ export default function Mixer({ taskId, result, bpm, songKey, retrying, onRetryT
   useLaneGestures(rowsRef, gestureOpts);
   const sheetOpen = phone && !!extract;
   useLaneGestures(sheetLaneRef, gestureOpts, [sheetOpen]);
+  useZoomGestures(rootRef, timeline);
 
   const [rulerChoice, setRulerChoice] = useState(null);
   const rulerMode = rulerChoice || (bpm ? 'bars' : 'time');
@@ -520,7 +545,7 @@ export default function Mixer({ taskId, result, bpm, songKey, retrying, onRetryT
   // Phone extract sheet: ruler + the source stem's lane + zoom, sticky on top.
   const laneTrack = extract ? (extract.source !== 'mix' ? extract.source : selection?.track || tracks[0]) : null;
   const sheetViewer = sheetOpen ? (
-    <div className="sticky top-11 z-[5] -mx-4 border-b border-line bg-paper px-4 pb-1">
+    <div data-zoom="" className="sticky top-11 z-[5] -mx-4 border-b border-line bg-paper px-4 pb-1 sm:-mx-6 sm:px-6">
       {ruler}
       <div ref={sheetLaneRef}>
         <Lane
@@ -528,7 +553,7 @@ export default function Mixer({ taskId, result, bpm, songKey, retrying, onRetryT
           variant={mix[laneTrack].variant}
           peaks={peaks}
           timeline={timeline}
-          height={112}
+          height={short ? 64 : 112}
           scale={scaleOf(laneTrack)}
           dim={false}
           selection={selection}
@@ -560,7 +585,7 @@ export default function Mixer({ taskId, result, bpm, songKey, retrying, onRetryT
   const menuTrack = menu && menu !== 'transport' ? menu : null;
 
   return (
-    <div className="flex w-full flex-col">
+    <div ref={rootRef} className="flex w-full flex-col">
       <JobLine
         taskId={taskId}
         result={result}
@@ -572,7 +597,7 @@ export default function Mixer({ taskId, result, bpm, songKey, retrying, onRetryT
         phone={phone}
       />
       {retryPanel}
-      <div className="sticky top-12 z-20 -mx-4 border-b border-line bg-paper px-4 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
+      <div data-zoom="" className="sticky top-12 z-20 -mx-4 border-b border-line bg-paper px-4 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
         {!phone && (
           <Transport
             timeline={timeline}
@@ -623,7 +648,7 @@ export default function Mixer({ taskId, result, bpm, songKey, retrying, onRetryT
         )}
       </div>
 
-      <div ref={rowsRef} data-ready={ready} className="divide-y divide-line border-b border-line">
+      <div ref={rowsRef} data-ready={ready} data-zoom="" className="divide-y divide-line border-b border-line">
         {tracks.map((t) => {
           const m = mix[t];
           const base = baseOf(t);
@@ -678,9 +703,10 @@ export default function Mixer({ taskId, result, bpm, songKey, retrying, onRetryT
       {anySolo && <span className="sr-only">Solo is on: only soloed stems play.</span>}
       <div aria-hidden="true" style={{ height: phone ? 'calc(72px + env(safe-area-inset-bottom))' : extract ? panelH + 8 : 24 }} />
 
+      {/* One instance across a rotation/resize past 640 px: name, tags,
+          options, Saved/Undo and the duplicate-save guard survive it. */}
       {extract && (
         <ExtractPanel
-          key={phone ? 'sheet' : 'docked'}
           layout={phone ? 'sheet' : 'docked'}
           taskId={taskId}
           tracks={tracks}
