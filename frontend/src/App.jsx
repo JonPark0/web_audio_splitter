@@ -67,7 +67,7 @@ export default function App() {
     <div className="min-h-screen bg-paper">
       <button
         type="button"
-        className="link sr-only text-caption focus:not-sr-only focus:fixed focus:left-4 focus:top-14 focus:z-50 focus:bg-paper"
+        className="link sr-only text-caption focus:not-sr-only focus:fixed focus:left-[max(1rem,env(safe-area-inset-left))] focus:top-14 focus:z-50 focus:bg-paper"
         onClick={() => document.getElementById('main')?.focus()}
       >
         Skip to content

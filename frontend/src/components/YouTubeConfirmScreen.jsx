@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { deleteTask, errorDetail, youtubeConfirm, youtubePreviewUrl } from '../api';
 import { navigate } from '../router';
 import TextButton from './TextButton';
@@ -78,9 +78,22 @@ function PreviewPlayer({ src }) {
  */
 export default function YouTubeConfirmScreen({ taskId, task, onChanged }) {
   const [busy, setBusy] = useState(''); // '' | 'confirm' | 'discard'
+  // Discard deletes the downloaded audio and sits next to Confirm: ask first.
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [error, setError] = useState('');
   const downloading = task.status === 'downloading';
   const percent = Number.isFinite(task.download_percent) ? task.download_percent : null;
+
+  // Focus follows the question in and out (the button pressed is replaced).
+  const askRef = useRef(null);
+  const confirmRef = useRef(null);
+  const shown = useRef(confirmDiscard);
+  useEffect(() => {
+    if (shown.current === confirmDiscard) return;
+    shown.current = confirmDiscard;
+    if (confirmDiscard) confirmRef.current?.focus();
+    else if (!document.activeElement || document.activeElement === document.body) askRef.current?.focus();
+  }, [confirmDiscard]);
 
   const confirm = async () => {
     setBusy('confirm');
@@ -150,9 +163,21 @@ export default function YouTubeConfirmScreen({ taskId, task, onChanged }) {
         <TextButton onClick={confirm} disabled={!!busy} className="text-h3" label="Confirm & split">
           {busy === 'confirm' ? 'Starting...' : 'Confirm & split'}
         </TextButton>
-        <TextButton onClick={discard} disabled={!!busy} label="Discard">
-          {busy === 'discard' ? 'Discarding...' : 'Discard'}
-        </TextButton>
+        {confirmDiscard ? (
+          <>
+            <span className="text-caption">Discard this download? The audio is deleted.</span>
+            <TextButton ref={confirmRef} onClick={discard} disabled={!!busy} label="Discard">
+              {busy === 'discard' ? 'Discarding...' : 'Discard'}
+            </TextButton>
+            <TextButton onClick={() => setConfirmDiscard(false)} disabled={!!busy}>
+              Keep
+            </TextButton>
+          </>
+        ) : (
+          <TextButton ref={askRef} onClick={() => setConfirmDiscard(true)} disabled={!!busy} label="Discard">
+            Discard
+          </TextButton>
+        )}
         {error && (
           <p className="m-0 text-caption" role="alert">
             <span className="text-muted">Error — </span>

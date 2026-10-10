@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { href } from '../../router';
 import RetryPanel from '../RetryPanel';
 import TextButton from '../TextButton';
@@ -40,10 +40,15 @@ export function JobsHeaderRow({ tier }) {
   );
 }
 
+// Panels that open as a strip under the row (the phone's "⋯" menu doesn't
+// count: it is a disclosure that keeps focus on its toggle).
+const STRIPS = new Set(['cancel', 'retry', 'delete']);
+
 function rowActions(task, cancelling) {
   const s = task.status;
   const list = [{ key: 'open', label: s === 'downloaded' ? 'Review' : 'Open', href: href(`/split/job/${task.task_id}`) }];
-  if (CANCELLABLE.has(s)) list.push({ key: 'cancel', label: cancelling ? 'Cancelling...' : 'Cancel', disabled: cancelling });
+  // Cancel asks first, like Delete: it sits next to Open and loses the work done so far.
+  if (CANCELLABLE.has(s)) list.push({ key: 'cancel', label: cancelling ? 'Cancelling...' : 'Cancel', disabled: cancelling, panel: 'cancel' });
   if (RETRYABLE.has(s)) list.push({ key: 'retry', label: 'Retry', panel: 'retry' });
   if (!IN_FLIGHT.has(s)) list.push({ key: 'delete', label: s === 'downloaded' ? 'Discard' : 'Delete', panel: 'delete' });
   return list;
@@ -70,6 +75,7 @@ function Actions({ actions, task, panel, onAction, className = '' }) {
         ) : (
           <TextButton
             key={a.key}
+            data-action={a.key}
             disabled={a.disabled}
             current={a.panel && panel === a.panel}
             aria-expanded={a.panel ? panel === a.panel : undefined}
@@ -88,8 +94,10 @@ function Actions({ actions, task, panel, onAction, className = '' }) {
 /**
  * One job. Single line (40 px) when the pane is wide enough, otherwise two
  * lines (56 px) where the whole row opens the job and the secondary actions
- * sit behind "⋯". Retry, delete confirmation and the phone action list open
- * as a strip under the row.
+ * sit behind "⋯". Retry, cancel and delete confirmation and the phone action
+ * list open as a strip under the row; focus goes into a strip when it opens
+ * and back to its action when it closes. On touch, where there is no hover
+ * title, long names wrap to a second line.
  */
 export default function JobRow({
   task,
@@ -112,16 +120,33 @@ export default function JobRow({
   const actions = rowActions(task, cancelling);
   const showError = (task.status === 'failed' || task.status === 'download_failed') && task.error;
   const openHref = href(`/split/job/${id}`);
+  const canCancel = CANCELLABLE.has(task.status);
 
   const onAction = (a) => {
-    if (a.key === 'cancel') onCancel();
-    else if (a.panel) onTogglePanel(a.panel);
+    if (a.panel) onTogglePanel(a.panel);
   };
+
+  const rowRef = useRef(null);
+  const stripRef = useRef(null);
+  const moreRef = useRef(null);
+  const prevPanel = useRef(panel);
+  useEffect(() => {
+    const was = prevPanel.current;
+    prevPanel.current = panel;
+    if (panel === was) return;
+    if (STRIPS.has(panel)) {
+      stripRef.current?.querySelector('button:not(:disabled), select, input, a[href]')?.focus();
+    } else if (STRIPS.has(was) && (!document.activeElement || document.activeElement === document.body)) {
+      // closed with focus inside it (Keep, a cancel or retry that went through)
+      const row = rowRef.current;
+      (row?.querySelector(`[data-action="${was}"]:not(:disabled)`) || moreRef.current || row?.querySelector('a[href]'))?.focus();
+    }
+  }, [panel]);
 
   const retryMarker = task.retry_of ? <span className="text-caption text-muted"> · retry</span> : null;
 
   return (
-    <li data-job-row className="flex flex-col">
+    <li ref={rowRef} data-job-row={id} className="flex flex-col">
       {tier === 'narrow' ? (
         <div className="relative flex min-h-14 items-center gap-2 py-1.5">
           <div className="min-w-0 flex-1">
@@ -129,7 +154,7 @@ export default function JobRow({
             <a
               href={openHref}
               aria-current={current ? 'page' : undefined}
-              className={`block truncate weight-hover before:absolute before:inset-0 before:content-[''] ${current ? 'weight-up' : ''}`}
+              className={`line-clamp-2 break-words weight-hover before:absolute before:inset-0 before:content-[''] ${current ? 'weight-up' : ''}`}
             >
               {name}
               {retryMarker}
@@ -143,10 +168,11 @@ export default function JobRow({
             </p>
           </div>
           <button
+            ref={moreRef}
             type="button"
             className="link relative z-10 h-11 w-11 shrink-0 text-h3"
             aria-label={`Actions for ${name}`}
-            aria-expanded={panel === 'menu' || panel === 'retry' || panel === 'delete'}
+            aria-expanded={panel === 'menu' || STRIPS.has(panel)}
             onClick={() => onTogglePanel(panel ? null : 'menu')}
           >
             <MoreIcon />
@@ -158,11 +184,11 @@ export default function JobRow({
           )}
         </div>
       ) : (
-        <div className={`grid min-h-10 items-center gap-x-3 coarse:min-h-12 ${GRID[tier]}`}>
+        <div className={`grid min-h-10 items-center gap-x-3 coarse:min-h-12 coarse:py-1 ${GRID[tier]}`}>
           <a
             href={openHref}
             aria-current={current ? 'page' : undefined}
-            className={`truncate weight-hover ${current ? 'weight-up' : ''}`}
+            className={`truncate weight-hover coarse:line-clamp-2 coarse:whitespace-normal coarse:break-words ${current ? 'weight-up' : ''}`}
             title={name}
           >
             {name}
@@ -206,8 +232,20 @@ export default function JobRow({
         </div>
       )}
 
+      {panel === 'cancel' && canCancel && (
+        <div ref={stripRef} className="flex flex-wrap items-center gap-x-5 gap-y-1 border-t border-line py-2" role="group" aria-label="Confirm cancel">
+          <span className="text-caption">Cancel this job? The work done on it so far is lost.</span>
+          <TextButton disabled={cancelling} onClick={onCancel}>
+            {cancelling ? 'Cancelling...' : 'Cancel job'}
+          </TextButton>
+          <TextButton disabled={cancelling} onClick={() => onTogglePanel(null)}>
+            Keep running
+          </TextButton>
+        </div>
+      )}
+
       {panel === 'delete' && (
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-1 border-t border-line py-2" role="group" aria-label="Confirm delete">
+        <div ref={stripRef} className="flex flex-wrap items-center gap-x-5 gap-y-1 border-t border-line py-2" role="group" aria-label="Confirm delete">
           <span className="text-caption">
             {task.status === 'downloaded' ? 'Discard this download?' : 'Delete this job and its stems?'} Library samples cut
             from it are kept.
@@ -222,15 +260,17 @@ export default function JobRow({
       )}
 
       {panel === 'retry' && (
-        <RetryPanel
-          className="border-t border-line py-2"
-          taskId={id}
-          initialModel={task.model}
-          initialRecover={task.recover}
-          initialRecoveryModel={task.recovery_model}
-          onStarted={onRetryStarted}
-          onCancel={() => onTogglePanel(null)}
-        />
+        <div ref={stripRef}>
+          <RetryPanel
+            className="border-t border-line py-2"
+            taskId={id}
+            initialModel={task.model}
+            initialRecover={task.recover}
+            initialRecoveryModel={task.recovery_model}
+            onStarted={onRetryStarted}
+            onCancel={() => onTogglePanel(null)}
+          />
+        </div>
       )}
     </li>
   );

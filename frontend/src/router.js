@@ -44,7 +44,10 @@ export function navigate(to, { replace = false } = {}) {
   const target = href(to);
   if (target === window.location.hash) return;
   if (replace) {
-    window.history.replaceState(null, '', target);
+    // Same screen (a filter change): keep the entry's state, which holds its
+    // scroll-restore key (components/shell/useRouteFocus).
+    const same = parseHash(target).path === parseHash().path;
+    window.history.replaceState(same ? window.history.state : null, '', target);
     // replaceState doesn't fire hashchange; notify listeners ourselves.
     window.dispatchEvent(new HashChangeEvent('hashchange'));
   } else {
