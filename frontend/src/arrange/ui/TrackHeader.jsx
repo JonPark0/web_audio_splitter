@@ -15,12 +15,12 @@ function formatPan(pan) {
 }
 
 // Per layout, not per viewport width: a landscape phone is 'phone' at 844 px.
-//   phone   38 px: two of them and the name fit the 72 px column / 56 px lane
-//           (`!` beats the global 44 px coarse rule for .link)
+//   phone   44 px: side by side under the name, clear of the meter, in the
+//           96 px column / 64 px lane (snap.js)
 //   tablet  44 px on touch, compact with a mouse
 //   desktop inline with the name
 const MS_SIZE = {
-  phone: 'h-[38px] !min-h-[38px] !min-w-[34px] items-center justify-center',
+  phone: 'h-11 w-11 items-center justify-center',
   tablet: 'min-h-[24px] min-w-[28px] items-center justify-center',
   desktop: 'min-w-[16px] coarse:min-h-[44px] coarse:min-w-[32px]',
 };
@@ -116,7 +116,7 @@ export function PanSlider({ track, set, className = '' }) {
  *            On touch a name renames only once its track is selected.
  *   tablet:  name over M/S (44 px on touch; side by side in a small lane
  *            with a mouse); the name opens the track sheet.
- *   phone:   name over M/S in 72 px; the name opens the track sheet.
+ *   phone:   name over 44 px M/S in 96 px; the name opens the track sheet.
  * A peak meter runs down the right edge.
  */
 export default memo(function TrackHeader({
@@ -206,7 +206,7 @@ export default memo(function TrackHeader({
         >
           {track.name}
         </button>
-        <MuteSolo track={track} set={set} size={mode} className={inline ? '' : `mt-auto justify-start ${phone ? 'pl-0.5' : 'pl-1'}`} />
+        <MuteSolo track={track} set={set} size={mode} className={inline ? '' : `mt-auto justify-start ${phone ? '' : 'pl-1'}`} />
         {meter}
       </div>
     );

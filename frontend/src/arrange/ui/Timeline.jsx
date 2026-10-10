@@ -794,7 +794,7 @@ export default function Timeline({
             className="sticky left-0 z-10 flex shrink-0 items-end border-b border-r border-b-ink border-r-line bg-paper px-2 pb-1 text-caption text-muted"
             style={{ width: headerWidth }}
           >
-            {mode === 'phone' ? `${tracks.length}` : `${tracks.length} ${tracks.length === 1 ? 'track' : 'tracks'}`}
+            {`${tracks.length} ${tracks.length === 1 ? 'track' : 'tracks'}`}
           </div>
           {/* Own stacking context: loop handles and flags stay under the corner cell */}
           <div className="relative isolate" style={{ width }}>
@@ -840,7 +840,7 @@ export default function Timeline({
             ))}
             <div className="flex items-center px-2" style={{ height: NEW_TRACK_ROW_HEIGHT }}>
               <TextButton muted onClick={onAddTrack} className="min-h-[44px] justify-center text-caption">
-                {mode === 'phone' ? '+ Track' : 'Add track'}
+                Add track
               </TextButton>
             </div>
           </div>
