@@ -765,7 +765,7 @@ export default function LibraryScreen() {
   // --- render -------------------------------------------------------------
   const toolbar = (
     <div
-      className="sticky z-20 -mx-4 border-b border-line bg-paper px-4 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8"
+      className="bleed-safe sticky z-20 border-b border-line bg-paper"
       style={{ top: HEADER_PX }}
     >
       {phone ? (

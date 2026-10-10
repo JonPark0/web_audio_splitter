@@ -597,7 +597,7 @@ export default function Mixer({ taskId, result, bpm, songKey, retrying, onRetryT
         phone={phone}
       />
       {retryPanel}
-      <div data-zoom="" className="sticky top-12 z-20 -mx-4 border-b border-line bg-paper px-4 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
+      <div data-zoom="" className="bleed-safe sticky top-12 z-20 border-b border-line bg-paper">
         {!phone && (
           <Transport
             timeline={timeline}

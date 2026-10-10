@@ -75,6 +75,7 @@
   label,
   summary,
   [role='button'],
+  [role='row'],
   [role='slider'],
   [role='option'],
   [role='menuitem'],
@@ -405,6 +406,31 @@
 }
 @media (min-width: 1024px) {
   .px-safe {
+    padding-left: max(2rem, env(safe-area-inset-left));
+    padding-right: max(2rem, env(safe-area-inset-right));
+  }
+}
+/* A sticky bar that bleeds to the edges of a .px-safe column: the negative
+   margin undoes exactly the column's padding (notch included), and the bar
+   pads its content back in by the same amount. */
+.bleed-safe {
+  margin-left: calc(-1 * max(1rem, env(safe-area-inset-left)));
+  margin-right: calc(-1 * max(1rem, env(safe-area-inset-right)));
+  padding-left: max(1rem, env(safe-area-inset-left));
+  padding-right: max(1rem, env(safe-area-inset-right));
+}
+@media (min-width: 640px) {
+  .bleed-safe {
+    margin-left: calc(-1 * max(1.5rem, env(safe-area-inset-left)));
+    margin-right: calc(-1 * max(1.5rem, env(safe-area-inset-right)));
+    padding-left: max(1.5rem, env(safe-area-inset-left));
+    padding-right: max(1.5rem, env(safe-area-inset-right));
+  }
+}
+@media (min-width: 1024px) {
+  .bleed-safe {
+    margin-left: calc(-1 * max(2rem, env(safe-area-inset-left)));
+    margin-right: calc(-1 * max(2rem, env(safe-area-inset-right)));
     padding-left: max(2rem, env(safe-area-inset-left));
     padding-right: max(2rem, env(safe-area-inset-right));
   }
