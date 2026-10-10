@@ -58,3 +58,17 @@ export function onJobsChanged(fn) {
 export function jobsChanged() {
   refreshListeners.forEach((fn) => fn());
 }
+
+// The jobs list's last rows and how many were loaded, for one filter. A
+// remount (Back to the Split home, opening a job) shows them at once at that
+// length while the poll refreshes them — so the position Back restores
+// exists again, instead of "Loading jobs..." and only the first page.
+let listCache = null; // { key, rows, limit, hasMore }
+
+export function cachedJobsList(key) {
+  return listCache?.key === key ? listCache : null;
+}
+
+export function cacheJobsList(entry) {
+  listCache = entry;
+}
