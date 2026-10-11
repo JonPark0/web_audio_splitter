@@ -419,7 +419,6 @@ test.describe('known bugs', () => {
 
   test('↑ keeps the selected row clear of the sticky bars', async ({ page, paging, browserName }) => {
     test.skip(browserName !== 'chromium', 'scrollIntoView(nearest) with scroll-margin only verified on Chromium');
-    test.fail(true, 'rows between the 56 px root scroll-padding and the 124-136 px sticky stack count as visible, so ↑ leaves the selection under the toolbar (frontend/src/index.css:64, LibraryScreen.jsx:265)');
     await prefs(page, { 'library:auto': false });
     const ui = await openLibrary(page, `tags=${paging.tag}`);
     test.skip(ui.phone || ui.coarse, 'keyboard browsing (desktop)');
