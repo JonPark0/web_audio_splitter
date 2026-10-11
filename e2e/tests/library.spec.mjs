@@ -455,14 +455,16 @@ test.describe('known bugs', () => {
   test('a touch-sized select keeps its chevron level with its text', async ({ page, paging }) => {
     const ui = await openLibrary(page, `tags=${paging.tag}`);
     test.skip(!ui.coarse, 'only touch layouts grow selects to 44 px');
-    test.fail(true, 'select.ainput pins its chevron at "top 2px" while coarse:min-h-11 centres the text 22 px down (frontend/src/index.css:300)');
     const f = await filterControls(page, ui);
     const select = f.scope.locator(f.sort);
     const m = await select.evaluate((el) => {
       const cs = getComputedStyle(el);
       const r = el.getBoundingClientRect();
-      const top = parseFloat(cs.backgroundPositionY) || 0;
       const size = parseFloat(cs.backgroundSize.split(' ')[1] || cs.backgroundSize) || 16;
+      // a length, or a percentage of the free height of the background's origin box
+      const [pt, pb] = cs.backgroundOrigin === 'content-box' ? [parseFloat(cs.paddingTop), parseFloat(cs.paddingBottom)] : [0, 0];
+      const y = cs.backgroundPositionY;
+      const top = parseFloat(cs.borderTopWidth) + pt + (y.endsWith('%') ? (parseFloat(y) / 100) * (el.clientHeight - pt - pb - size) : parseFloat(y) || 0);
       return { height: r.height, chevronCentre: top + size / 2 };
     });
     test.skip(m.height < 43.5, 'touch sizing not applied in this engine');
