@@ -401,7 +401,7 @@ export default function useProjectState({ onError } = {}) {
           const permanent = status === 400 || status === 404 || status === 422;
           if (!permanent) scheduleRetry();
           onErrorRef.current?.(
-            `Could not save “${project.name}”: ${message}.${permanent ? '' : ' Retrying automatically —'} your edits are kept on this device.`
+            `Could not save “${project.name}”: ${message}. ${permanent ? 'Your' : 'Retrying automatically — your'} edits are kept on this device.`
           );
         }
       } finally {
