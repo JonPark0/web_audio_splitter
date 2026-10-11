@@ -331,7 +331,6 @@ test('job names in single-line rows are 44 px touch targets', async ({ page, api
   const [id] = await seedCancelled(api, [name]);
   await page.goto('/#/split');
   test.skip(await isNarrow(page), 'two-line rows stretch the name link over the whole row');
-  test.fail(true, 'The name link of a single-line row is ~25 px tall on touch (Open is 44 px); only the narrow tier stretches it — frontend/src/components/jobs/JobRow.jsx:239');
   const link = jobRow(page, id).getByRole('link', { name, exact: true });
   const box = await link.boundingBox();
   expect(box.height).toBeGreaterThanOrEqual(44);

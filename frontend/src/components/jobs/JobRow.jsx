@@ -231,16 +231,20 @@ export default function JobRow({
           )}
         </div>
       ) : (
-        <div className={`grid min-h-10 items-center gap-x-3 coarse:min-h-12 coarse:py-1 ${GRID[tier]}`}>
+        <div className={`grid min-h-10 items-center gap-x-3 coarse:min-h-12 ${GRID[tier]}`}>
           <CheckCell checked={checked} onToggle={(shift) => onCheck(shift)} label={`Select ${name}`} />
+          {/* on touch the link fills the row's height (a 48 px target, not
+              just its ~25 px line of text); the row's padding moved into it */}
           <a
             href={openHref}
             aria-current={current ? 'page' : undefined}
-            className={`truncate weight-hover coarse:line-clamp-2 coarse:whitespace-normal coarse:break-words ${current ? 'weight-up' : ''}`}
+            className={`truncate weight-hover coarse:flex coarse:min-h-12 coarse:items-center coarse:self-stretch coarse:whitespace-normal coarse:py-1 ${current ? 'weight-up' : ''}`}
             title={name}
           >
-            {name}
-            {retryMarker}
+            <span className="coarse:line-clamp-2 coarse:break-words">
+              {name}
+              {retryMarker}
+            </span>
           </a>
           <span className="text-caption tabular-nums text-muted">{formatDuration(task.duration)}</span>
           <span className="truncate text-caption text-muted">{modelText(task)}</span>

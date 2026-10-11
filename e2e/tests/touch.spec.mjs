@@ -117,9 +117,9 @@ test.describe('split', () => {
 
   test('job names are 44 px tap targets on one-line rows too', async ({ page, world }) => {
     await openSplit(page, world);
-    const narrow = await narrowRows(page);
-    test.fail(!narrow, 'one-line job rows (wide lists: landscape phones, larger tablets): the name link is ~25 px tall and the row is no target - JobRow.jsx:236-243');
-    const s = await hitSize(jobRow(page, 2).locator('a[href*="/split/job/"]').first());
+    const link = jobRow(page, 2).locator('a[href*="/split/job/"]').first();
+    await centerOf(link); // on screen: a landscape phone's rows start below the first screen
+    const s = await hitSize(link);
     expect(s.h, 'name link hit height').toBeGreaterThanOrEqual(44);
   });
 
