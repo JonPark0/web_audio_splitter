@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 const FLOOR_DB = -60;
 const RELEASE_PER_FRAME = 0.06; // fraction of the scale a meter may fall per frame
+const FALL_FRAMES = Math.ceil(1 / RELEASE_PER_FRAME);
 const CLIP_LEVEL = 0.999;
 
 /** Linear peak -> 0..1 on a dB scale (FLOOR_DB .. 0 dBFS). */
@@ -15,7 +16,8 @@ function level(peak) {
  * Meter readings as a tiny pub/sub (like the position clock): one
  * requestAnimationFrame loop polls engine.getMeters() while playing and
  * pushes it to subscribers, which write to their own DOM nodes - nothing
- * re-renders per frame. Stopped: one final all-zero reading.
+ * re-renders per frame. Stopped: empty readings for as many frames as a
+ * full-scale meter takes to fall, so every meter's release runs to rest.
  */
 export function useMeterClock(engine, playing) {
   const listeners = useRef(new Set());
@@ -30,11 +32,16 @@ export function useMeterClock(engine, playing) {
   );
   useEffect(() => {
     const emit = (m) => listeners.current.forEach((fn) => fn(m));
-    if (!engine || !playing || typeof engine.getMeters !== 'function') {
-      emit(null);
-      return undefined;
-    }
     let raf;
+    if (!engine || !playing || typeof engine.getMeters !== 'function') {
+      let left = FALL_FRAMES;
+      const fall = () => {
+        emit(null);
+        if (--left > 0) raf = requestAnimationFrame(fall);
+      };
+      fall();
+      return () => cancelAnimationFrame(raf);
+    }
     const tick = () => {
       let m = null;
       try {
@@ -46,10 +53,7 @@ export function useMeterClock(engine, playing) {
       raf = requestAnimationFrame(tick);
     };
     tick();
-    return () => {
-      cancelAnimationFrame(raf);
-      emit(null);
-    };
+    return () => cancelAnimationFrame(raf);
   }, [engine, playing]);
   return clock;
 }
@@ -80,7 +84,7 @@ export function MeterBar({ clock, pick, channels = 1, vertical = false, classNam
       const target = peaks ? level(Array.isArray(peaks) ? peaks[ch] ?? 0 : peaks) : 0;
       const prev = shown.current[ch] || 0;
       const v = target >= prev ? target : Math.max(target, prev - RELEASE_PER_FRAME);
-      if (Math.abs(v - prev) < 1e-3 && v !== 0) continue;
+      if (v === prev || (Math.abs(v - prev) < 1e-3 && v !== 0)) continue;
       shown.current[ch] = v;
       const el = bars.current[ch];
       if (el) el.style.transform = vertical ? `scaleY(${v})` : `scaleX(${v})`;

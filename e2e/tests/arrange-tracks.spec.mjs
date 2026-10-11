@@ -140,7 +140,6 @@ test.describe('desktop headers', () => {
 
   test('meters fall back to zero after Stop', async ({ page, api, smp, browserName }) => {
     test.skip(browserName !== 'chromium', 'headless audio output is only dependable in Chromium');
-    test.fail(true, 'F6: on Stop the meters get one null reading and fall one release step (0.06), then freeze at ~0.5 (frontend/src/arrange/ui/Meters.jsx:34,51 + :82)');
     const p = await seedProject(api, 'Meters stop', [track('Alpha', [clip(smp.loop, 0)])]);
     await openProject(page, p);
     await playButton(page).click();
