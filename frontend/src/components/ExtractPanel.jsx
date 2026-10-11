@@ -147,7 +147,15 @@ export default function ExtractPanel({
   const [step, setStep] = useState('0.01');
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState(null);
-  const [savedKey, setSavedKey] = useState(null);
+  const [savedKey, setSavedKeyState] = useState(null);
+  // The guard reads the saved key from a ref: between a save finishing and
+  // the re-render, an Enter still runs the previous render's save, which saw
+  // no saved key and saved the same sample twice (WebKit).
+  const savedKeyRef = useRef(null);
+  const setSavedKey = (k) => {
+    savedKeyRef.current = k;
+    setSavedKeyState(k);
+  };
   const savingRef = useRef(false);
 
   const start = selection?.start ?? 0;
@@ -198,7 +206,7 @@ export default function ExtractPanel({
     JSON.stringify({ asMix, source, s: start.toFixed(4), e: end.toFixed(4), name, o: options(), v: asMix ? mixStems() : variantOf(source) });
 
   const save = async (asMix) => {
-    if (!selection || tooShort || savingRef.current || keyFor(asMix) === savedKey) return;
+    if (!selection || tooShort || savingRef.current || keyFor(asMix) === savedKeyRef.current) return;
     savingRef.current = true; // B6: a second Enter while saving is ignored
     setSaving(true);
     setStatus(null);
