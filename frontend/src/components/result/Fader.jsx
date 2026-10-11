@@ -22,9 +22,13 @@ export default function Fader({ db, onChange, label, className = '', showValue =
   const grab = () => {
     dragging.current = true;
     const release = () => {
-      dragging.current = false;
       window.removeEventListener('pointerup', release, true);
       window.removeEventListener('pointercancel', release, true);
+      // Firefox sets the value once more on mouseup, after pointerup: without
+      // the detent that release left the fader at ±0.5 instead of 0.
+      setTimeout(() => {
+        dragging.current = false;
+      });
     };
     window.addEventListener('pointerup', release, true);
     window.addEventListener('pointercancel', release, true);
