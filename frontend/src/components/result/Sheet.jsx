@@ -14,6 +14,7 @@ import TextButton from '../TextButton';
 export default function Sheet({ title, onClose, children, full = false, headerExtra = null, pinned = null }) {
   const panelRef = useRef(null);
   const topRef = useRef(null);
+  const closeRef = useRef(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
   useScrollLock();
@@ -22,7 +23,7 @@ export default function Sheet({ title, onClose, children, full = false, headerEx
   // moved focus to Close mid-edit.
   useEffect(() => {
     const prev = document.activeElement;
-    panelRef.current?.querySelector('button, [href], input, select')?.focus({ preventScroll: true });
+    closeRef.current?.focus({ preventScroll: true });
     const onKey = (e) => {
       if (e.key === 'Escape') {
         e.stopPropagation();
@@ -55,7 +56,7 @@ export default function Sheet({ title, onClose, children, full = false, headerEx
     <div className={`flex h-11 items-center gap-3 ${full ? 'border-b border-line' : ''}`}>
       <h2 className="m-0 min-w-0 flex-1 truncate text-h4 font-light capitalize">{title}</h2>
       {headerExtra}
-      <TextButton onClick={onClose} className="rs-hit text-caption">
+      <TextButton ref={closeRef} onClick={onClose} className="rs-hit text-caption">
         Close
       </TextButton>
     </div>

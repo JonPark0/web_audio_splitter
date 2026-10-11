@@ -127,6 +127,7 @@ export default function ExtractPanel({
   layout = 'docked',
   onHeight,
   viewer,
+  viewerTools = null,
   coarse = false,
 }) {
   const sheet = layout === 'sheet';
@@ -460,7 +461,7 @@ export default function ExtractPanel({
 
   if (sheet) {
     return (
-      <Sheet title={`Extract · ${label}`} onClose={onClose} full pinned={viewer}>
+      <Sheet title={`Extract · ${label}`} onClose={onClose} full pinned={viewer} headerExtra={viewerTools}>
         <div className="flex flex-col gap-2 pb-6 pt-1 text-caption">
           <div className="flex items-center gap-4">
             <button

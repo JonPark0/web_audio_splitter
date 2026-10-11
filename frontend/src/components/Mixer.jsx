@@ -547,7 +547,26 @@ export default function Mixer({ taskId, result, bpm, songKey, retrying, onRetryT
   );
 
   // Phone extract sheet: ruler + the source stem's lane + zoom, pinned on top.
+  // On a landscape phone the zoom controls sit in the sheet's title bar: the
+  // pinned block took over half the screen (more with a marker strip).
   const laneTrack = extract ? (extract.source !== 'mix' ? extract.source : selection?.track || tracks[0]) : null;
+  const sheetZoom = sheetOpen ? (
+    <div className="flex items-center gap-1 text-caption">
+      <button type="button" onClick={zoomOut} disabled={!zoomed} aria-label="Zoom out" className="link h-11 w-11 items-center justify-center">
+        <FiMinus className="icon" aria-hidden="true" />
+      </button>
+      <button type="button" onClick={zoomIn} aria-label="Zoom in" className="link h-11 w-11 items-center justify-center">
+        <FiPlus className="icon" aria-hidden="true" />
+      </button>
+      <TextButton muted onClick={fit} disabled={!zoomed} className="h-11 min-w-11 justify-center">
+        Fit
+      </TextButton>
+      <TextButton muted onClick={zoomSel} disabled={!selection} className="h-11 justify-center px-2">
+        Selection
+      </TextButton>
+      <span className="ml-auto text-muted">Pinch to zoom</span>
+    </div>
+  ) : null;
   const sheetViewer = sheetOpen ? (
     <div data-zoom="" className="-mx-4 border-b border-line bg-paper px-4 pb-1 sm:-mx-6 sm:px-6">
       {ruler}
@@ -568,21 +587,7 @@ export default function Mixer({ taskId, result, bpm, songKey, retrying, onRetryT
           status={null}
         />
       </div>
-      <div className="flex items-center gap-1 text-caption">
-        <button type="button" onClick={zoomOut} disabled={!zoomed} aria-label="Zoom out" className="link h-11 w-11 items-center justify-center">
-          <FiMinus className="icon" aria-hidden="true" />
-        </button>
-        <button type="button" onClick={zoomIn} aria-label="Zoom in" className="link h-11 w-11 items-center justify-center">
-          <FiPlus className="icon" aria-hidden="true" />
-        </button>
-        <TextButton muted onClick={fit} disabled={!zoomed} className="h-11 min-w-11 justify-center">
-          Fit
-        </TextButton>
-        <TextButton muted onClick={zoomSel} disabled={!selection} className="h-11 justify-center px-2">
-          Selection
-        </TextButton>
-        <span className="ml-auto text-muted">Pinch to zoom</span>
-      </div>
+      {!short && sheetZoom}
     </div>
   ) : null;
 
@@ -737,6 +742,7 @@ export default function Mixer({ taskId, result, bpm, songKey, retrying, onRetryT
           onHeight={setPanelH}
           coarse={coarse}
           viewer={sheetViewer}
+          viewerTools={short ? sheetZoom : null}
         />
       )}
 
