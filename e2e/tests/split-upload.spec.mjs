@@ -424,7 +424,6 @@ test('the status line reports a file the server refused', async ({ page }) => {
 test('focus stays in the YouTube link field after a refused link', async ({ page, browserName }) => {
   test.skip(page.viewportSize().width < 640, 'phones put the keyboard away on purpose');
   test.skip(browserName === 'firefox', 'unverified: Firefox may keep focus on a disabled field');
-  test.fail(true, 'The link field is disabled while checking, so focus drops to <body> and is never put back — frontend/src/components/UploadScreen.jsx:429 (and :211-213)');
   await page.goto('/#/split');
   await splitForm(page).getByRole('radiogroup', { name: 'Source' }).getByText('YouTube').click();
   const link = splitForm(page).getByLabel('Link', { exact: true });

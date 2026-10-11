@@ -209,8 +209,11 @@ export default function UploadScreen({ onBarHeight }) {
     } catch (e) {
       setError(errorDetail(e, 'Could not fetch that link.'));
       // on phones the error is in that bar too; on wider screens keep the
-      // field focused for fixing the link
+      // field focused for fixing the link (or put it there, when the CTA
+      // that was clicked went disabled and dropped focus to the page)
+      const el = document.activeElement;
       if (barFixed()) urlRef.current?.blur();
+      else if (!el || el === document.body || el.matches('[data-cta]')) urlRef.current?.focus();
     } finally {
       setYtBusy('');
     }
@@ -422,6 +425,9 @@ export default function UploadScreen({ onBarHeight }) {
         ) : (
           <div className="flex flex-col gap-1">
             <Field inline label="Link" htmlFor={urlId}>
+              {/* Busy while checking, but read-only rather than disabled: a
+                  disabled field drops focus to the page, and after a refused
+                  link it should still be there for fixing. */}
               <input
                 ref={urlRef}
                 id={urlId}
@@ -432,10 +438,11 @@ export default function UploadScreen({ onBarHeight }) {
                 spellCheck={false}
                 placeholder="https://www.youtube.com/watch?v=..."
                 value={youtubeUrl}
-                disabled={!!ytBusy}
+                readOnly={!!ytBusy}
+                aria-disabled={ytBusy ? 'true' : undefined}
                 onChange={(e) => setYoutubeUrl(e.target.value)}
                 onKeyDown={holdComposingEnter}
-                className="ainput"
+                className={`ainput ${ytBusy ? 'text-muted' : ''}`}
               />
             </Field>
             <Field inline label="After download" labelId={`${urlId}-after`}>
