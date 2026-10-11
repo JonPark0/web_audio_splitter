@@ -227,20 +227,29 @@ export function ProjectPicker({ projects, project, busy, onOpen, onCreate, onRen
   );
 }
 
-/** Export popover: range, stems, normalise. */
-export function ExportControl({ project, exporting, progress, disabled, onExport, placement = 'down', align = 'right' }) {
+/**
+ * Export popover: range, stems, normalise. `compact` (a landscape phone has
+ * ~200 px under the toolbar) sets the choices beside the notes and the
+ * Export button, so all of it fits on the screen.
+ */
+export function ExportControl({ project, exporting, progress, disabled, onExport, compact = false, placement = 'down', align = 'right' }) {
   const [open, setOpen] = useState(false);
   const [scope, setScope] = useState('song');
   const [stems, setStems] = useState(false);
   const [normalize, setNormalize] = useState(false);
   const ref = useRef(null);
   useDismiss(open, ref, () => setOpen(false));
-  const hasLoop = project?.loop?.end_beat > project?.loop?.start_beat;
+  // Every project stores a region (0-16 until one is set); only a loop that
+  // is on is the user's, and what playback repeats.
+  const hasLoop = !!project?.loop?.enabled && project.loop.end_beat > project.loop.start_beat;
   const effective = hasLoop ? scope : 'song';
   const word = (on, label, onClick, title, disabled) => (
     <TextButton current={on} aria-pressed={on} onClick={onClick} title={title} disabled={disabled} className={tap}>
       {label}
     </TextButton>
+  );
+  const loopHint = !hasLoop && (
+    <p className={`m-0 text-caption text-muted ${compact ? '' : '-mt-1 pl-20'}`}>Loop needs a loop region (L, or drag on the ruler).</p>
   );
   return (
     <span ref={ref} className="relative">
@@ -259,37 +268,42 @@ export function ExportControl({ project, exporting, progress, disabled, onExport
         <div
           role="dialog"
           aria-label="Export"
-          className={`absolute z-50 flex w-[min(300px,92vw)] flex-col gap-2 border border-line bg-paper p-3 ${
+          className={`absolute z-50 flex border border-line bg-paper p-3 ${compact ? 'w-[min(540px,92vw)] gap-6' : 'w-[min(300px,92vw)] flex-col gap-2'} ${
             align === 'right' ? 'right-0' : 'left-0'
           } ${placement === 'up' ? 'bottom-full mb-1' : 'top-full mt-1'}`}
         >
-          <div className="flex items-baseline gap-4">
-            <span className="w-16 text-caption text-muted">Range</span>
-            {word(effective === 'song', 'Song', () => setScope('song'))}
-            {word(effective === 'loop', 'Loop', () => setScope('loop'), 'The loop region', !hasLoop)}
+          <div className="flex shrink-0 flex-col gap-2">
+            <div className="flex items-baseline gap-4">
+              <span className="w-16 text-caption text-muted">Range</span>
+              {word(effective === 'song', 'Song', () => setScope('song'))}
+              {word(effective === 'loop', 'Loop', () => setScope('loop'), 'The loop region', !hasLoop)}
+            </div>
+            {!compact && loopHint}
+            <div className="flex items-baseline gap-4">
+              <span className="w-16 text-caption text-muted">Files</span>
+              {word(!stems, 'Mix', () => setStems(false), 'One stereo WAV')}
+              {word(stems, 'Stems', () => setStems(true), 'One WAV per track, zipped')}
+            </div>
+            <div className="flex items-baseline gap-4">
+              <span className="w-16 text-caption text-muted">Level</span>
+              {word(!normalize, 'As mixed', () => setNormalize(false))}
+              {word(normalize, 'Normalise', () => setNormalize(true), 'Peak at −1 dBFS (stems share one gain)')}
+            </div>
           </div>
-          {!hasLoop && <p className="m-0 -mt-1 pl-20 text-caption text-muted">Loop needs a loop region (L, or drag on the ruler).</p>}
-          <div className="flex items-baseline gap-4">
-            <span className="w-16 text-caption text-muted">Files</span>
-            {word(!stems, 'Mix', () => setStems(false), 'One stereo WAV')}
-            {word(stems, 'Stems', () => setStems(true), 'One WAV per track, zipped')}
+          <div className="flex min-w-0 flex-col gap-2">
+            {compact && loopHint}
+            <p className="m-0 text-caption text-muted">24-bit / 48 kHz WAV{stems ? ' per track, in one ZIP' : ''}.</p>
+            <TextButton
+              disabled={exporting || disabled}
+              onClick={() => {
+                setOpen(false);
+                onExport({ scope: effective, stems, normalize });
+              }}
+              className={`self-start ${tap}`}
+            >
+              {stems ? 'Export stems' : 'Export WAV'}
+            </TextButton>
           </div>
-          <div className="flex items-baseline gap-4">
-            <span className="w-16 text-caption text-muted">Level</span>
-            {word(!normalize, 'As mixed', () => setNormalize(false))}
-            {word(normalize, 'Normalise', () => setNormalize(true), 'Peak at −1 dBFS (stems share one gain)')}
-          </div>
-          <p className="m-0 text-caption text-muted">24-bit / 48 kHz WAV{stems ? ' per track, in one ZIP' : ''}.</p>
-          <TextButton
-            disabled={exporting || disabled}
-            onClick={() => {
-              setOpen(false);
-              onExport({ scope: effective, stems, normalize });
-            }}
-            className={`self-start ${tap}`}
-          >
-            {stems ? 'Export stems' : 'Export WAV'}
-          </TextButton>
         </div>
       )}
     </span>

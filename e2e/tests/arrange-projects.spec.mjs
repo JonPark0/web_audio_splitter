@@ -291,7 +291,6 @@ test('a project deleted elsewhere: the edit reports a permanent error, without r
 });
 
 test('the permanent save error reads as a sentence', async ({ page, api }) => {
-  test.fail(true, 'F5: "…: Project not found. your edits are kept on this device." – lower-case after the full stop (frontend/src/arrange/ui/useProjectState.js:404)');
   const p = await seedProject(api, 'Error text');
   const ui = await openProject(page, p);
   await api.del(`/projects/${p.id}`);

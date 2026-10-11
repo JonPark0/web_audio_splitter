@@ -6,9 +6,6 @@ import { wavInfo, zipEntries } from './arrange/audio.mjs';
 // Node: format, channels, length and that they aren't silent. Every profile.
 
 const RATE = 48000;
-const F7 = 'F7: on a landscape phone the Export popover (toolbar, z-20 stacking context) runs under the fixed bottom bar (z-40), which covers "Export WAV" (frontend/src/arrange/ui/Toolbar.jsx:259-263, ArrangeScreen.jsx:1164 vs :1377)';
-/** Landscape phones can't reach the Export button at all (F7): covered by its own test below. */
-const skipF7 = (ui) => test.skip(ui.phone && ui.short, F7);
 
 /** The downloaded file, read into memory (test-results may be cleared by a concurrent run). */
 async function downloaded(download) {
@@ -31,7 +28,6 @@ test('song, loop region and stems: 24-bit / 48 kHz WAVs of the right length (ste
     loop: { enabled: true, start_beat: 2, end_beat: 6 },
   });
   const ui = await openProject(page, p);
-  skipF7(ui);
 
   const song = await exportAs(page, ui, { range: 'Song', files: 'Mix', level: 'As mixed' });
   expect(song.name).toBe(`${p.name}.wav`);
@@ -62,7 +58,6 @@ test('song, loop region and stems: 24-bit / 48 kHz WAVs of the right length (ste
 test('exporting a project without clips says there is nothing to export', async ({ page, api }) => {
   const p = await seedProject(api, 'Export empty', [track('T1')]);
   const ui = await openProject(page, p);
-  skipF7(ui);
   await press(page, ui, page.getByRole('button', { name: 'Export', exact: true }).locator('visible=true').first());
   const dlg = page.getByRole('dialog', { name: 'Export' });
   await press(page, ui, dlg.getByRole('button', { name: 'Song', exact: true }));
@@ -71,7 +66,6 @@ test('exporting a project without clips says there is nothing to export', async 
 });
 
 test('with no loop region set, the Loop range is disabled and says why', async ({ page, api, smp }) => {
-  test.fail(true, 'F3: every project stores a 0–16 loop (backend/projects.py:58-67), and hasLoop ignores loop.enabled (frontend/src/arrange/ui/Toolbar.jsx:237), so Loop is never disabled and exports bars 1–4 (silence for an empty project)');
   const p = await seedProject(api, 'Export no loop', [track('T1', [clip(smp.drum, 0)])]);
   const ui = await openProject(page, p);
   await press(page, ui, page.getByRole('button', { name: 'Export', exact: true }).locator('visible=true').first());
@@ -83,7 +77,6 @@ test('with no loop region set, the Loop range is disabled and says why', async (
 test('every control of the Export popover can be reached (nothing covers it)', async ({ page, api, smp }) => {
   const p = await seedProject(api, 'Export reach', [track('T1', [clip(smp.drum, 0)])]);
   const ui = await openProject(page, p);
-  test.fail(ui.phone && ui.short, F7);
   await press(page, ui, page.getByRole('button', { name: 'Export', exact: true }).locator('visible=true').first());
   const dlg = page.getByRole('dialog', { name: 'Export' });
   await expect(dlg).toBeVisible();

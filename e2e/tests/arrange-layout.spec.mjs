@@ -71,7 +71,7 @@ test('touch: toolbar, bottom bar and header controls are at least 44 px tall', a
       'div.sticky.top-12 select',
       'div.fixed.bottom-0 button',
       'div.fixed.bottom-0 input',
-      '[data-timeline] .sticky.left-0.z-20 button:not([title="Track settings"])', // track names: see arrange-tracks (F4)
+      '[data-timeline] .sticky.left-0.z-20 button',
     ].join(',');
     return [...document.querySelectorAll(sel)]
       .filter((e) => e.getBoundingClientRect().width > 0 && e.getAttribute('aria-label') !== 'No clipping')

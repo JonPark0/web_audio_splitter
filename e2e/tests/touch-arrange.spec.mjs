@@ -211,7 +211,6 @@ test('the project BPM field: one tap focuses it (16 px), "121,5" commits 121.5',
 
 test('track names (track settings) are 44 px tap targets', async ({ page, api, world }) => {
   await openProject(page, api, world);
-  test.fail(true, 'the track-name button is caption text with leading-tight, ~18 px tall on touch - TrackHeader.jsx:198-206');
   const b = await page.getByRole('button', { name: 'Track 2', exact: true }).filter({ visible: true }).first().boundingBox();
   expect(b.height, 'Track 2 name height').toBeGreaterThanOrEqual(44);
 });

@@ -140,7 +140,6 @@ test.describe('desktop headers', () => {
 
   test('meters fall back to zero after Stop', async ({ page, api, smp, browserName }) => {
     test.skip(browserName !== 'chromium', 'headless audio output is only dependable in Chromium');
-    test.fail(true, 'F6: on Stop the meters get one null reading and fall one release step (0.06), then freeze at ~0.5 (frontend/src/arrange/ui/Meters.jsx:34,51 + :82)');
     const p = await seedProject(api, 'Meters stop', [track('Alpha', [clip(smp.loop, 0)])]);
     await openProject(page, p);
     await playButton(page).click();
@@ -191,7 +190,6 @@ test.describe('phone and tablet headers', () => {
   });
 
   test('the track name (the way into the track sheet) is a 44 px touch target', async ({ page, api }) => {
-    test.fail(true, 'F4: phone/tablet track name button is ~18 px tall (frontend/src/arrange/ui/TrackHeader.jsx:199-205, no coarse min-height)');
     const p = await seedProject(api, 'Name target', [track('Alpha'), track('Beta')]);
     const ui = await openProject(page, p);
     test.skip(ui.desktop, 'desktop header on this viewport');
@@ -228,7 +226,6 @@ test.describe('desktop header on a touch screen (1366 px)', () => {
   });
 
   test('the master clip indicator is a 44 px touch target', async ({ page, api }) => {
-    test.fail(true, 'F4: the master clip light/reset button is 32×13 px on touch (frontend/src/arrange/ui/Meters.jsx:125-137, no coarse size)');
     const p = await seedProject(api, 'Clip light');
     await openProject(page, p);
     const b = await page.getByRole('button', { name: 'No clipping' }).boundingBox();
