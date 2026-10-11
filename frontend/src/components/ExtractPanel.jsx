@@ -13,11 +13,18 @@ export const MIN_SAMPLE_SEC = 0.05; // the backend's MIN_SAMPLE_SECONDS
 
 /** m:ss.mmm field: typed and committed on Enter/blur; ± steppers on touch. */
 function TimeField({ label, value, onCommit, active, onFocus, disabled, step, steppers }) {
-  const [draft, setDraft] = useState(null);
+  const [draft, setDraftState] = useState(null);
+  // The blur right after Enter/Escape runs commit before a re-render: it
+  // reads the draft from here, so Escape's discarded text isn't committed.
+  const draftRef = useRef(null);
+  const setDraft = (v) => {
+    draftRef.current = v;
+    setDraftState(v);
+  };
   const clickFocus = useRef(false);
   const commit = () => {
-    if (draft == null) return;
-    const t = parseTime(draft);
+    if (draftRef.current == null) return;
+    const t = parseTime(draftRef.current);
     setDraft(null);
     if (t != null) onCommit(t);
   };

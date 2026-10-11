@@ -436,7 +436,6 @@ test.describe('desktop', () => {
   });
 
   test('Esc in a start/end field restores the previous value', async ({ page, seed, api }) => {
-    test.fail(true, 'Esc commits the typed value: blur() runs onBlur=commit with the stale draft - ExtractPanel.jsx:63,68-70');
     const { d } = await setup(page, seed, api);
     await dragLane(page, 'vocals.wav', 6, 8.4, d);
     const start = page.getByRole('textbox', { name: 'Start (m:ss.mmm)' });
