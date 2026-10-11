@@ -13,7 +13,7 @@ import {
 } from '../project';
 import ClipView from './ClipView';
 import Playhead from './Playhead';
-import { dragSession, followPointer, releaseFocus } from './pointerDrag';
+import { dragSession, followPointer, onTapClick, releaseFocus } from './pointerDrag';
 import Ruler from './Ruler';
 import { SAMPLE_MIME, sampleDrag } from './sampleDrag';
 import TrackHeader from './TrackHeader';
@@ -75,6 +75,7 @@ function edgeRoom(track, id, x0, x1, span) {
  *            clip (300 ms) to drag it, long-press an empty lane for a
  *            selection box; trim handles sit outside the selected clip;
  *            two fingers pinch-zoom. With an armed sample a tap places it.
+ *            Taps act on their click: one that stops a fling does nothing.
  *   pen    - like the mouse, but holds the scroll for the whole drag; while
  *            a pen is in use the lanes, clips and ruler don't pan at all.
  *   keys   - one clip is in the tab order (the focused, else the first
@@ -589,9 +590,11 @@ export default forwardRef(function Timeline(
             s.end();
             d.finish(commit);
           } else if (commit && !moved && !gesture.current.pinching) {
-            const p = live.current.project;
-            const tid = p.tracks.find((t) => t.clips.some((c) => c.id === clip.id))?.id;
-            live.current.onSelectClips([clip.id], tid); // tap selects
+            onTapClick(() => {
+              const p = live.current.project;
+              const tid = p.tracks.find((t) => t.clips.some((c) => c.id === clip.id))?.id;
+              live.current.onSelectClips([clip.id], tid); // tap selects
+            });
           }
         };
         followPointer(e, {
@@ -662,7 +665,7 @@ export default forwardRef(function Timeline(
     });
     if (armed && e.pointerType !== 'mouse') {
       // Touch/pen placement: a swipe still scrolls the lanes; only a tap
-      // (no travel, not taken by the browser) places.
+      // (no travel, not taken by the browser, a click) places.
       let moved = false;
       followPointer(e, {
         move: (ev) => {
@@ -670,8 +673,10 @@ export default forwardRef(function Timeline(
         },
         up: () => {
           if (moved || gesture.current.pinching || gesture.current.owner) return;
-          const g = at(start);
-          onPlaceArmed(tracks[g.trackIndex]?.id ?? null, g.beat);
+          onTapClick(() => {
+            const g = at(start);
+            onPlaceArmed(tracks[g.trackIndex]?.id ?? null, g.beat);
+          });
         },
       });
       return;
@@ -744,7 +749,10 @@ export default forwardRef(function Timeline(
         return;
       }
       setBand(null);
-      if (commit && !moved && !gesture.current.pinching) onSelectClips(shift ? base : [], tracks[start.trackIndex]?.id);
+      if (!commit || moved || gesture.current.pinching) return;
+      const select = () => onSelectClips(shift ? base : [], tracks[start.trackIndex]?.id);
+      if (e.pointerType === 'touch') onTapClick(select);
+      else select();
     };
     followPointer(e, {
       move: (ev) => {

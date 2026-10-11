@@ -69,7 +69,6 @@ async function openClipSheet(page) {
 
 test('a tap that stops a fling selects no clip', async ({ page, api, world, browserName }) => {
   cdpOnly(browserName);
-  test.fail(true, 'taps are read from pointerdown/up, which still arrive when the browser drops the click of a fling-stopping tap - Timeline.jsx:586-595');
   await openProject(page, api, world);
   const g = await geometry(page);
   await tapIntoLanesFling(page, g, { x: g.sc.x + g.sc.w * 0.6, y: g.at(0, 0).y }); // track 1 is clips end to end
@@ -78,7 +77,6 @@ test('a tap that stops a fling selects no clip', async ({ page, api, world, brow
 
 test('with a sample armed, a tap that stops a fling places nothing', async ({ page, api, world, browserName }) => {
   cdpOnly(browserName);
-  test.fail(true, 'placement fires on pointerup of the fling-stopping tap (the browser only drops its click) - Timeline.jsx:663-676');
   await openProject(page, api, world);
   await page.getByRole('button', { name: 'Samples', exact: true }).filter({ visible: true }).first().click();
   await page.locator('[role=dialog] li button[title^="Tap, then tap a lane"]').first().click();

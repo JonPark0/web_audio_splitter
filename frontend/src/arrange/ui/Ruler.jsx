@@ -1,5 +1,5 @@
 import React, { memo, useRef, useState } from 'react';
-import { dragSession, followPointer, releaseFocus } from './pointerDrag';
+import { dragSession, followPointer, onTapClick, releaseFocus } from './pointerDrag';
 import { RULER_HEIGHT, RULER_HEIGHT_TOUCH, beatToPx, pxToBeat, snapBeat } from './snap';
 
 const DRAG_THRESHOLD_PX = 3;
@@ -161,18 +161,22 @@ export default memo(function Ruler({
     const x0 = e.clientX;
     const anchor = beatAt(x0);
     if (e.pointerType === 'touch') {
-      // Tap seeks; anything that moves is the browser's horizontal scroll.
-      // Not while another finger drags something (a palm, a stray thumb).
+      // Tap seeks (on its click: not a tap that stops a fling); anything
+      // that moves is the browser's horizontal scroll. Not while another
+      // finger drags something (a palm, a stray thumb).
       let moved = false;
       followPointer(e, {
         move: (ev) => {
           if (Math.abs(ev.clientX - x0) > TOUCH_SLOP_PX) moved = true;
         },
         up: () => {
-          const release = !moved && claim();
-          if (!release) return;
-          release();
-          onSeek(snapBeat(anchor, step, 'round'));
+          if (moved) return;
+          onTapClick(() => {
+            const release = claim();
+            if (!release) return;
+            release();
+            onSeek(snapBeat(anchor, step, 'round'));
+          });
         },
       });
       return;

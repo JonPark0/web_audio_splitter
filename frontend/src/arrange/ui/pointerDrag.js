@@ -3,6 +3,7 @@
 
 const EDGE_PX = 32; // auto-scroll zone inside the visible lanes' edges
 const EDGE_SPEED = 1200; // px/s with the pointer at (or past) the edge
+const TAP_CLICK_MS = 1000; // how long a tap's click may lag its pointerup
 
 /**
  * Window listeners for ONE pointer, from its pointerdown until it lifts.
@@ -51,6 +52,28 @@ export function followPointer(down, { move, up, cancel }) {
   window.addEventListener('keydown', onKey, true);
   window.addEventListener('blur', abort);
   return stop;
+}
+
+/**
+ * Call from a finger tap's pointerup: runs `tap()` on the click that follows.
+ * A tap that stops a fling (momentum scroll) still gets its pointerdown and
+ * pointerup, but the browser drops its click - so that click, not the
+ * pointerup, is what makes a tap. Forgotten at the next pointerdown, or when
+ * no click comes.
+ */
+export function onTapClick(tap) {
+  const onClick = () => {
+    stop();
+    tap();
+  };
+  const timer = setTimeout(stop, TAP_CLICK_MS);
+  function stop() {
+    clearTimeout(timer);
+    window.removeEventListener('click', onClick, true);
+    window.removeEventListener('pointerdown', stop, true);
+  }
+  window.addEventListener('click', onClick, true);
+  window.addEventListener('pointerdown', stop, true);
 }
 
 /**
