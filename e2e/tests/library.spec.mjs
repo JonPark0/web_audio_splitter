@@ -428,6 +428,8 @@ test.describe('known bugs', () => {
     const header = page.locator('[data-library-list] > [role=row]');
     for (let i = 0; i < 25; i += 1) {
       await page.keyboard.press('ArrowUp');
+      // the row is focused and scrolled in the next frame, not by the time press() returns
+      await expect(selected).toBeFocused();
       const [h, s] = [await header.boundingBox(), await selected.boundingBox()];
       expect(s.y, `after ↑ ×${i + 1} the selected row starts below the sticky header`).toBeGreaterThanOrEqual(h.y + h.height - 1);
     }
