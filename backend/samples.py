@@ -453,16 +453,18 @@ def list_samples(
     if bpm_max is not None:
         stmt = stmt.where(_effective_bpm() <= bpm_max)
 
+    # Every order ends on the unique id: with ties left to the planner, rows
+    # come back in a limit-dependent order and offset paging repeats/skips them.
     order = {
-        "newest": [Sample.created_at.desc()],
-        "oldest": [Sample.created_at.asc()],
-        "name": [func.lower(Sample.name).asc()],
-        "-name": [func.lower(Sample.name).desc()],
-        "bpm": [_effective_bpm().asc().nulls_last(), Sample.created_at.desc()],
-        "-bpm": [_effective_bpm().desc().nulls_last(), Sample.created_at.desc()],
-        "duration": [Sample.duration_sec.asc()],
-        "-duration": [Sample.duration_sec.desc()],
-        "key": [_effective_key().asc().nulls_last(), func.lower(Sample.name).asc()],
+        "newest": [Sample.created_at.desc(), Sample.id.desc()],
+        "oldest": [Sample.created_at.asc(), Sample.id.asc()],
+        "name": [func.lower(Sample.name).asc(), Sample.id.asc()],
+        "-name": [func.lower(Sample.name).desc(), Sample.id.desc()],
+        "bpm": [_effective_bpm().asc().nulls_last(), Sample.created_at.desc(), Sample.id.desc()],
+        "-bpm": [_effective_bpm().desc().nulls_last(), Sample.created_at.desc(), Sample.id.desc()],
+        "duration": [Sample.duration_sec.asc(), Sample.id.asc()],
+        "-duration": [Sample.duration_sec.desc(), Sample.id.desc()],
+        "key": [_effective_key().asc().nulls_last(), func.lower(Sample.name).asc(), Sample.id.asc()],
     }[sort]
     with session_scope() as session:
         matched = session.scalar(select(func.count()).select_from(stmt.subquery()))

@@ -390,7 +390,6 @@ test.describe('layout', () => {
 
 test.describe('known bugs', () => {
   test('ties in length page and order the same at any page size', async ({ page, api, lib }) => {
-    test.fail(true, 'sort=duration/-duration has no unique tiebreaker: equal lengths come back in a page-size-dependent order (backend/samples.py:463-464)');
     test.setTimeout(120_000);
     const tag = `tie${uid()}`;
     const job = await lib.job();
