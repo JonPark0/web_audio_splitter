@@ -87,7 +87,6 @@ test.describe('load', () => {
   test('the "derived" tag is shown in full', async ({ page, seed, browserName }) => {
     test.skip(browserName !== 'chromium', 'truncation measured with Chromium font metrics');
     const L = await openJob(page, await seed.roformer());
-    test.fail(L.size !== 'phone', 'label column truncates "derived" ("deri…" on desktop, "d" on tablets) - TrackRow.jsx:141-149');
     const tag = page.getByText('derived', { exact: true });
     const { sw, cw } = await tag.evaluate((el) => ({ sw: el.scrollWidth, cw: el.clientWidth }));
     expect(sw, 'text wider than its box (ellipsis)').toBeLessThanOrEqual(cw);

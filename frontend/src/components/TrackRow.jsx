@@ -137,21 +137,27 @@ export default memo(function TrackRow({
       <FiMoreHorizontal className="icon" aria-hidden="true" />
     </button>
   );
-  const nameEl = (
+  const name = (
+    <span className={`max-w-full shrink-0 truncate capitalize leading-5 ${audible ? '' : 'text-muted'}`} title={label}>
+      {label}
+    </span>
+  );
+  const tag = derived ? (
+    <span className="min-w-0 truncate text-[11px] leading-4 text-muted" title="A mix of the other stems — starts muted so nothing plays twice">
+      derived
+    </span>
+  ) : peakMax != null && peakMax < 0.01 ? (
+    <span className="min-w-0 truncate text-[11px] leading-4 text-muted" title={`Peak ${(20 * Math.log10(Math.max(peakMax, 1e-6))).toFixed(0)} dBFS — the model found almost nothing for this stem`}>
+      near silent
+    </span>
+  ) : null;
+  // Beside M and S a long name ("instrumental") left the tag no room ("deri…",
+  // "d"): only the phone line keeps it beside the name; touch rows put it
+  // under the name, desktop rows on the version line.
+  const nameEl = (withTag) => (
     <span className="flex min-w-0 items-baseline gap-2">
-      <span className={`max-w-full shrink-0 truncate capitalize leading-5 ${audible ? '' : 'text-muted'}`} title={label}>
-        {label}
-      </span>
-      {derived && (
-        <span className="min-w-0 truncate text-[11px] leading-5 text-muted" title="A mix of the other stems — starts muted so nothing plays twice">
-          derived
-        </span>
-      )}
-      {!derived && peakMax != null && peakMax < 0.01 && (
-        <span className="min-w-0 truncate text-[11px] leading-5 text-muted" title={`Peak ${(20 * Math.log10(Math.max(peakMax, 1e-6))).toFixed(0)} dBFS — the model found almost nothing for this stem`}>
-          near silent
-        </span>
-      )}
+      {name}
+      {withTag && tag}
     </span>
   );
   const variantEl = hasRecovered ? (
@@ -166,7 +172,7 @@ export default memo(function TrackRow({
     return (
       <div>
         <div className="flex h-11 items-center gap-1">
-          <span className="min-w-0 flex-1">{nameEl}</span>
+          <span className="min-w-0 flex-1">{nameEl(true)}</span>
           {hasRecovered && <span className="text-caption text-muted">{variant === 'recovered' ? 'R' : 'O'}</span>}
           {mute}
           {solo}
@@ -183,7 +189,10 @@ export default memo(function TrackRow({
       <div className="grid" style={{ gridTemplateColumns: ROW_COLUMNS.touch }}>
         <div className="flex min-w-0 flex-col self-start pr-2" style={{ height: rowH }}>
           <div className="flex h-11 items-center gap-1">
-            <span className="min-w-0 flex-1">{nameEl}</span>
+            <span className="flex min-w-0 flex-1 flex-col">
+              {nameEl(false)}
+              {tag}
+            </span>
             <span className="flex shrink-0 items-center text-caption">
               {mute}
               {solo}
@@ -218,14 +227,17 @@ export default memo(function TrackRow({
     <div className="grid" style={{ gridTemplateColumns: ROW_COLUMNS[size] }}>
       <div className="flex min-w-0 flex-col justify-center gap-0.5 self-start py-1.5 pr-3" style={{ height: rowH }}>
         <div className="flex items-baseline justify-between gap-2">
-          {nameEl}
+          {nameEl(false)}
           <span className="flex shrink-0 items-baseline gap-2.5 text-caption">
             {mute}
             {solo}
           </span>
         </div>
         <Fader db={db} onChange={(v) => onDb(track, v)} label={label} />
-        <div className="flex h-5 items-baseline text-caption">{variantEl}</div>
+        <div className="flex h-5 items-baseline gap-3 text-caption">
+          {variantEl}
+          {tag}
+        </div>
       </div>
       <div className="min-w-0">
         {lane}
