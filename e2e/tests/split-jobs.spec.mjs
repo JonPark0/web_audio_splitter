@@ -308,7 +308,7 @@ test('narrow list: Select mode (tap rows), More → Select all, Stop selecting; 
   await expect(jobRow(page, ids[1]).getByRole('link').first()).toBeVisible();
 });
 
-// ---- known bugs: these assert the right behaviour and are expected to fail until fixed ----
+// ---- fixed bugs: regression tests (they were marked test.fail until the fix) ----
 
 test('shift-click extends the selection from the last box clicked, every time', async ({ page, api, isMobile }) => {
   test.skip(isMobile, 'needs a mouse and keyboard');

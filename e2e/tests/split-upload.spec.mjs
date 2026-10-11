@@ -409,7 +409,7 @@ test.describe('YouTube link', () => {
   });
 });
 
-// ---- known bugs: these assert the right behaviour and are expected to fail until fixed ----
+// ---- fixed bugs: regression tests (they were marked test.fail until the fix) ----
 
 test('the status line reports a file the server refused', async ({ page }) => {
   const u = uid();

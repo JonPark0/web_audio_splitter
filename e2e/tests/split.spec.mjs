@@ -299,7 +299,7 @@ test.describe('layout', () => {
   });
 });
 
-// ---- known bugs: these assert the right behaviour and are expected to fail until fixed ----
+// ---- fixed bugs: regression tests (they were marked test.fail until the fix) ----
 
 test('opening a finished job moves focus to its heading', async ({ page, api }) => {
   const name = `${uid()}.wav`;
