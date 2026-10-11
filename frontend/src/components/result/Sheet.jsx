@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { useScrollLock } from '../../scrollLock';
 import TextButton from '../TextButton';
 
 /**
@@ -6,12 +7,14 @@ import TextButton from '../TextButton';
  * closed by the veil, Escape or Close. `full` makes it a full-screen page
  * (the phone extract sheet). px-safe like the page column: clear of a
  * landscape notch, and the extract sheet's lane is exactly as wide as the
- * timeline it draws.
+ * timeline it draws. The page behind holds still while it's open (scroll
+ * lock, a veil that takes no touch panning), as with the Library's sheets.
  */
 export default function Sheet({ title, onClose, children, full = false, headerExtra = null }) {
   const panelRef = useRef(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  useScrollLock();
   // Once per open: callers pass a new inline onClose on every render, and
   // re-running this on one (a focused time field re-renders the mixer)
   // moved focus to Close mid-edit.
@@ -33,7 +36,7 @@ export default function Sheet({ title, onClose, children, full = false, headerEx
 
   return (
     <div className="fixed inset-0 z-40" role="dialog" aria-modal="true" aria-label={title}>
-      {!full && <div className="absolute inset-0 bg-paper/70" onClick={onClose} aria-hidden="true" />}
+      {!full && <div className="absolute inset-0 touch-none bg-paper/70" onClick={onClose} aria-hidden="true" />}
       <div
         ref={panelRef}
         className={

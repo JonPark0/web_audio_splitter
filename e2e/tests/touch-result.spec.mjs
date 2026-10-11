@@ -151,7 +151,6 @@ test('phone: a sheet holds the page still - swipes on its veil or panel scroll n
   cdpOnly(browserName);
   const L = await openMany(page, world);
   test.skip(L.size !== 'phone', 'phone sheets');
-  test.fail(true, 'the result sheets lock nothing (no scroll lock, veil without touch-action: none), unlike the Library ones - result/Sheet.jsx:29-31');
   await page.evaluate(() => window.scrollTo(0, 0));
   expect(await page.evaluate(() => document.documentElement.scrollHeight - innerHeight), 'page taller than the screen').toBeGreaterThan(20);
   await page.getByRole('button', { name: 'bass: extract, download, spectrogram, level' }).click();
