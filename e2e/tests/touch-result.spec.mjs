@@ -169,7 +169,6 @@ test('phone: a sheet holds the page still - swipes on its veil or panel scroll n
 
 test('a vertical swipe that starts on a level fader leaves the level alone', async ({ page, world, browserName }) => {
   cdpOnly(browserName);
-  test.fail(true, "Chromium's native range input jumps to the finger on touchstart, so a scroll that starts on a fader sets the level (iOS doesn't) - Fader.jsx:33-46");
   const L = await openMany(page, world);
   let fader;
   if (L.size === 'phone') {

@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { FiChevronDown, FiMinus, FiMoreHorizontal, FiPlay, FiPlus, FiSquare } from 'react-icons/fi';
 import TextButton from '../../components/TextButton';
 import { MOD, isComposing, parseDecimal } from '../../keys';
+import { useTouchSliderGuard } from '../../touchSlider';
 import { MAX_BPM, MIN_BPM } from '../project';
 import { ResetValue } from './fields';
 import { ClipIndicator, MeterBar } from './Meters';
@@ -297,6 +298,7 @@ export function ExportControl({ project, exporting, progress, disabled, onExport
 
 /** Master volume fader; the readout resets it to 0 dB. */
 export function MasterFader({ masterGain, onMasterGain, className = '' }) {
+  const guard = useTouchSliderGuard((db) => onMasterGain(Math.round(dbToGain(db) * 10000) / 10000));
   return (
     <span className={`flex items-center gap-1.5 text-caption ${className}`} title="Master volume (double-click or tap the value to reset)">
       <input
@@ -305,7 +307,7 @@ export function MasterFader({ masterGain, onMasterGain, className = '' }) {
         max="6"
         step="0.5"
         value={gainToDb(masterGain)}
-        onChange={(e) => onMasterGain(Math.round(dbToGain(parseFloat(e.target.value)) * 10000) / 10000)}
+        {...guard}
         onDoubleClick={() => onMasterGain(1)}
         aria-label="Master volume"
         aria-valuetext={formatDb(masterGain)}

@@ -124,7 +124,6 @@ test('a vertical swipe that starts on the ruler or a loop handle moves neither t
 
 test('a vertical swipe that starts on the clip gain slider leaves the gain alone', async ({ page, api, world, browserName }) => {
   cdpOnly(browserName);
-  test.fail(true, "Chromium's native range input jumps to the finger on touchstart, so a scroll that starts on it sets the gain (iOS doesn't) - ClipInspector.jsx:333-341");
   await openProject(page, api, world);
   await selectClip(page, 2);
   await openClipSheet(page);

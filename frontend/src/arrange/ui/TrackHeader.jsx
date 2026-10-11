@@ -1,6 +1,7 @@
 import React, { memo, useRef, useState } from 'react';
 import { FiMoreHorizontal } from 'react-icons/fi';
 import TextButton from '../../components/TextButton';
+import { useTouchSliderGuard } from '../../touchSlider';
 import { ResetValue } from './fields';
 import InlineName from './InlineName';
 import { useCoarsePointer } from './layout';
@@ -63,6 +64,7 @@ function MuteSolo({ track, set, size = 'desktop', className = '' }) {
  * resets to 0 dB when tapped (double-click on the slider still does).
  */
 export function VolumeSlider({ track, set, showValue = true, className = '' }) {
+  const guard = useTouchSliderGuard((db) => set({ volume: Math.min(2, Math.round(dbToGain(db) * 10000) / 10000) }, `volume:${track.id}`));
   return (
     <div className={`flex min-w-0 items-center gap-1.5 text-caption text-muted ${className}`} title="Volume (double-click or tap the value to reset)">
       <input
@@ -71,7 +73,7 @@ export function VolumeSlider({ track, set, showValue = true, className = '' }) {
         max="6"
         step="0.5"
         value={gainToDb(track.volume)}
-        onChange={(e) => set({ volume: Math.min(2, Math.round(dbToGain(parseFloat(e.target.value)) * 10000) / 10000) }, `volume:${track.id}`)}
+        {...guard}
         onDoubleClick={() => set({ volume: 1 })}
         className="slider min-w-0 flex-1 coarse:h-11"
         aria-label={`${track.name} volume`}
@@ -88,6 +90,7 @@ export function VolumeSlider({ track, set, showValue = true, className = '' }) {
 
 /** Pan; the readout centres it when tapped. */
 export function PanSlider({ track, set, className = '' }) {
+  const guard = useTouchSliderGuard((pan) => set({ pan }, `pan:${track.id}`));
   return (
     <div className={`flex min-w-0 items-center gap-1.5 text-caption text-muted ${className}`} title="Pan (double-click or tap the value to centre)">
       <input
@@ -96,7 +99,7 @@ export function PanSlider({ track, set, className = '' }) {
         max="1"
         step="0.01"
         value={track.pan}
-        onChange={(e) => set({ pan: parseFloat(e.target.value) }, `pan:${track.id}`)}
+        {...guard}
         onDoubleClick={() => set({ pan: 0 })}
         className="slider min-w-0 flex-1 coarse:h-11"
         aria-label={`${track.name} pan`}

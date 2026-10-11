@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { deleteTask, errorDetail, youtubeConfirm, youtubePreviewUrl } from '../api';
 import { navigate } from '../router';
+import { useTouchSliderGuard } from '../touchSlider';
 import TextButton from './TextButton';
 import Hairline from './jobs/Hairline';
 import { jobsChanged } from './jobs/jobsStore';
@@ -21,6 +22,10 @@ function PreviewPlayer({ src }) {
   const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const seek = useTouchSliderGuard((t) => {
+    if (audioRef.current) audioRef.current.currentTime = t;
+    setTime(t);
+  });
 
   const toggle = () => {
     const audio = audioRef.current;
@@ -55,11 +60,7 @@ function PreviewPlayer({ src }) {
         step="0.1"
         value={Math.min(time, duration || 0)}
         disabled={!duration}
-        onChange={(e) => {
-          const t = parseFloat(e.target.value);
-          if (audioRef.current) audioRef.current.currentTime = t;
-          setTime(t);
-        }}
+        {...seek}
         className="slider slider-touch min-w-0 flex-1"
         aria-label="Seek"
       />
