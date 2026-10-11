@@ -412,7 +412,6 @@ test.describe('YouTube link', () => {
 // ---- known bugs: these assert the right behaviour and are expected to fail until fixed ----
 
 test('the status line reports a file the server refused', async ({ page }) => {
-  test.fail(true, 'Batch summary ignores refused files when 0 or 1 files succeeded ("Add audio files first" / "Queued …") — frontend/src/components/UploadScreen.jsx:231-238');
   const u = uid();
   await page.goto('/#/split');
   await fileInput(page).setInputFiles(asFile(media('not-audio.mp3'), `${u}.mp3`));

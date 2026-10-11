@@ -222,21 +222,27 @@ export default function UploadScreen({ onBarHeight }) {
     else submitYoutube();
   };
 
-  // A finished batch: say what happened (the latest one only — failed rows
-  // of an earlier batch stay listed until retried or removed).
+  // A finished batch: say what happened, failures included, until the next
+  // files are picked (the latest batch only — failed rows of an earlier
+  // batch stay listed until retried or removed).
   const ended = items.filter((i) => i.state === 'done' || i.state === 'error');
   const lastBatch = Math.max(0, ...ended.map((i) => i.batch || 0));
   const batchItems = ended.filter((i) => i.batch === lastBatch);
   const doneItems = batchItems.filter((i) => i.state === 'done');
-  const batchSummary =
-    !uploading && doneItems.length
-      ? doneItems.length === 1
-        ? { text: 'Queued', name: doneItems[0].file.name, href: href(`/split/job/${doneItems[0].taskId}`) }
-        : {
-            text: `${doneItems.length} jobs queued${batchItems.length > doneItems.length ? `, ${batchItems.length - doneItems.length} failed` : ''}.`,
-            href: null,
-          }
-      : null;
+  const failedItems = batchItems.filter((i) => i.state === 'error');
+  const jobHref = (item) => href(`/split/job/${item.taskId}`);
+  let batchSummary = null;
+  if (!uploading && !ready.length && batchItems.length) {
+    const failed = failedItems.length;
+    if (doneItems.length === 1 && !failed) batchSummary = { text: 'Queued', name: doneItems[0].file.name, href: jobHref(doneItems[0]) };
+    else if (doneItems.length) {
+      batchSummary = {
+        text: `${doneItems.length} ${doneItems.length === 1 ? 'job' : 'jobs'} queued${failed ? `, ${failed} failed` : ''}.`,
+        href: doneItems.length === 1 ? jobHref(doneItems[0]) : null,
+      };
+    } else if (failed === 1) batchSummary = { text: 'Failed', name: failedItems[0].file.name, note: failedItems[0].error };
+    else batchSummary = { text: `${failed} files failed.` };
+  }
 
   let ctaLabel;
   if (inputMode === 'youtube') ctaLabel = ytBusy ? 'Fetching...' : autoSplit ? 'Download & split' : 'Download';
