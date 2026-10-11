@@ -542,10 +542,10 @@ export default function Mixer({ taskId, result, bpm, songKey, retrying, onRetryT
     <Ruler timeline={timeline} bpm={bpm} mode={rulerMode} selection={selection} onSeek={seek} coarse={coarse} height={coarse ? 30 : 20} />
   );
 
-  // Phone extract sheet: ruler + the source stem's lane + zoom, sticky on top.
+  // Phone extract sheet: ruler + the source stem's lane + zoom, pinned on top.
   const laneTrack = extract ? (extract.source !== 'mix' ? extract.source : selection?.track || tracks[0]) : null;
   const sheetViewer = sheetOpen ? (
-    <div data-zoom="" className="sticky top-11 z-[5] -mx-4 border-b border-line bg-paper px-4 pb-1 sm:-mx-6 sm:px-6">
+    <div data-zoom="" className="-mx-4 border-b border-line bg-paper px-4 pb-1 sm:-mx-6 sm:px-6">
       {ruler}
       <div ref={sheetLaneRef}>
         <Lane

@@ -652,7 +652,6 @@ test.describe('touch', () => {
     const id = await seed.recovered();
     const L = await openJob(page, id);
     test.skip(!(L.size === 'phone' && L.short), 'landscape phones');
-    test.fail(true, 'sticky header + viewer take ~200 of ~360 px and the sheet has no scroll-padding: focused fields land under it - Mixer.jsx:548, Sheet.jsx:36');
     const d = await stemDuration(api, id);
     const { scope, laneEl } = await openExtract(page, L);
     await tapLane(page, laneEl, 6, d);

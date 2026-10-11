@@ -460,8 +460,7 @@ export default function ExtractPanel({
 
   if (sheet) {
     return (
-      <Sheet title={`Extract · ${label}`} onClose={onClose} full>
-        {viewer}
+      <Sheet title={`Extract · ${label}`} onClose={onClose} full pinned={viewer}>
         <div className="flex flex-col gap-2 pb-6 pt-1 text-caption">
           <div className="flex items-center gap-4">
             <button
