@@ -45,7 +45,6 @@ async function openExtract(page, L) {
 
 test('the Start field keeps focus when tapped after Set end, and takes a comma decimal', async ({ page, world }) => {
   const L = await openMany(page, world);
-  test.fail(L.size === 'phone', "phone extract sheet: focusing a time field re-renders the mixer, whose new inline onClose re-runs the sheet's focus effect and moves focus to its Close button - result/Sheet.jsx:13-27, Mixer.jsx:732");
   const { scope, laneEl } = await openExtract(page, L);
   const tapLane = async (f) => {
     const b = await centerOf(laneEl);

@@ -10,13 +10,18 @@ import TextButton from '../TextButton';
  */
 export default function Sheet({ title, onClose, children, full = false, headerExtra = null }) {
   const panelRef = useRef(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  // Once per open: callers pass a new inline onClose on every render, and
+  // re-running this on one (a focused time field re-renders the mixer)
+  // moved focus to Close mid-edit.
   useEffect(() => {
     const prev = document.activeElement;
     panelRef.current?.querySelector('button, [href], input, select')?.focus({ preventScroll: true });
     const onKey = (e) => {
       if (e.key === 'Escape') {
         e.stopPropagation();
-        onClose();
+        onCloseRef.current();
       }
     };
     window.addEventListener('keydown', onKey, true);
@@ -24,7 +29,7 @@ export default function Sheet({ title, onClose, children, full = false, headerEx
       window.removeEventListener('keydown', onKey, true);
       prev?.focus?.({ preventScroll: true });
     };
-  }, [onClose]);
+  }, []);
 
   return (
     <div className="fixed inset-0 z-40" role="dialog" aria-modal="true" aria-label={title}>
