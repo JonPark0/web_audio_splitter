@@ -211,13 +211,15 @@ export default function JobsPane({ className = '', currentId = null }) {
     lastCheckedRef.current = null;
   };
 
-  // Shift extends from the last box clicked, like a file manager.
+  // Shift extends from the last box clicked, like a file manager. The anchor
+  // is read now: the updater may run later, after the ref moved on to `id`.
   const toggleCheck = (id, shift) => {
     setBulkReport('');
+    const anchor = lastCheckedRef.current;
     setChecked((prev) => {
       const next = new Set(prev);
       const ids = (rows || []).map((t) => t.task_id);
-      const from = ids.indexOf(lastCheckedRef.current);
+      const from = ids.indexOf(anchor);
       const to = ids.indexOf(id);
       if (shift && from > -1 && to > -1) {
         const on = !prev.has(id);
@@ -304,8 +306,10 @@ export default function JobsPane({ className = '', currentId = null }) {
 
   useEffect(() => {
     if (!selecting) return undefined;
+    // Not from a text field or select (Escape is theirs), but from the
+    // checkboxes doing the selecting, yes.
     const onKey = (e) => {
-      if (e.key === 'Escape' && !bulkProgress && !e.target.closest?.('input, select, textarea')) clearSelection();
+      if (e.key === 'Escape' && !bulkProgress && !e.target.closest?.('input:not([type=checkbox]), select, textarea')) clearSelection();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);

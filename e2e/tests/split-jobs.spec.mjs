@@ -308,7 +308,7 @@ test('narrow list: Select mode (tap rows), More → Select all, Stop selecting; 
   await expect(jobRow(page, ids[1]).getByRole('link').first()).toBeVisible();
 });
 
-// ---- known bugs: these assert the right behaviour and are expected to fail until fixed ----
+// ---- fixed bugs: regression tests (they were marked test.fail until the fix) ----
 
 test('shift-click extends the selection from the last box clicked, every time', async ({ page, api, isMobile }) => {
   test.skip(isMobile, 'needs a mouse and keyboard');
@@ -316,7 +316,6 @@ test('shift-click extends the selection from the last box clicked, every time', 
   await seedCancelled(api, Array.from({ length: 16 }, (_, i) => `${u}-${String(i).padStart(2, '0')}.wav`));
   await page.goto(`/#/split?q=${u}`);
   test.skip(await isNarrow(page), 'checkboxes only on single-line lists');
-  test.fail(true, 'Only the first shift-click selects a range: toggleCheck reads lastCheckedRef inside the deferred setChecked updater after it was set to the clicked id — frontend/src/components/jobs/JobsPane.jsx:215-232');
   const boxes = jobsRegion(page).locator('li[data-job-row]').getByRole('checkbox');
   await expect(boxes).toHaveCount(16);
   const checked = () => boxes.evaluateAll((bs) => bs.map((b, i) => (b.checked ? i : -1)).filter((i) => i >= 0));
@@ -335,7 +334,6 @@ test('Escape clears the selection while a row checkbox has focus', async ({ page
   const [id] = await seedCancelled(api, [`${u}.wav`]);
   await page.goto(`/#/split?q=${u}`);
   if (await isNarrow(page)) await jobsRegion(page).getByRole('button', { name: 'Select jobs' }).click();
-  test.fail(true, 'The Escape handler ignores keys from any <input>, including the row checkboxes themselves — frontend/src/components/jobs/JobsPane.jsx:308');
   const box = jobRow(page, id).getByRole('checkbox');
   await box.focus();
   await page.keyboard.press('Space');
@@ -345,7 +343,6 @@ test('Escape clears the selection while a row checkbox has focus', async ({ page
 });
 
 test('Back from a job keeps the rows Load more added to a searched list', async ({ page, api }) => {
-  test.fail(true, 'The one-entry list cache is overwritten by the job page\'s own (unfiltered) jobs list, so Back to a searched/filtered list shows only the first 30 rows — frontend/src/components/jobs/jobsStore.js:66-74, JobsPane.jsx:138 (JobView.jsx:272)');
   const u = uid();
   await seedCancelled(api, Array.from({ length: 33 }, (_, i) => `${u}-${String(i + 1).padStart(2, '0')}.wav`));
   await page.goto(`/#/split?q=${u}`);

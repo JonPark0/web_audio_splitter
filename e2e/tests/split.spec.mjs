@@ -159,6 +159,18 @@ test.describe('job page', () => {
     await expect(page).toHaveURL(/#\/split$/);
   });
 
+  test('a failed restoration says why in a line, not a traceback', async ({ page, api }) => {
+    // the recovery models aren't installed here: the restore subprocess fails
+    const id = await seedJob(api, media('oneshot.wav'), { name: `${uid()}.wav`, recover: true });
+    const { status, error } = await api.waitJob(id);
+    expect(status).toBe('failed');
+    expect(error).toMatch(/^Recovery failed/);
+    expect(error).not.toContain('Traceback');
+    expect(error.length).toBeLessThan(400);
+    await page.goto(`/#/split/job/${id}`);
+    await expect(main(page).getByRole('alert')).toHaveText(`Failed — ${error}`);
+  });
+
   test('"← Jobs" goes back to the list', async ({ page, api }) => {
     const [id] = await seedCancelled(api, [`${uid()}.wav`]);
     await page.goto(`/#/split/job/${id}`);
@@ -287,10 +299,9 @@ test.describe('layout', () => {
   });
 });
 
-// ---- known bugs: these assert the right behaviour and are expected to fail until fixed ----
+// ---- fixed bugs: regression tests (they were marked test.fail until the fix) ----
 
 test('opening a finished job moves focus to its heading', async ({ page, api }) => {
-  test.fail(true, 'Focus goes to the placeholder <h1>Job</h1>, which unmounts when the stems screen replaces it, leaving focus on <body> — frontend/src/components/jobs/JobView.jsx:156,191 with shell/useRouteFocus.js:171');
   const name = `${uid()}.wav`;
   const id = await seedJob(api, media('oneshot.wav'), { name });
   await api.waitJob(id);
@@ -306,17 +317,16 @@ test('opening a finished job moves focus to its heading', async ({ page, api }) 
 });
 
 test('leaving a job page for another section titles the page after that section', async ({ page, api }) => {
-  test.fail(true, 'JobView\'s unmount cleanup resets the title to "Split — Audio Splitter" after App set "Library — …" (the lazy screen unmounts the job view later) — frontend/src/components/jobs/JobView.jsx:140-142 vs App.jsx:52');
   const [id] = await seedCancelled(api, [`${uid()}.wav`]);
   await page.goto(`/#/split/job/${id}`);
   await expect(main(page).getByRole('alert')).toContainText('Cancelled — ');
   await nav(page).getByRole('link', { name: 'Library', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Library' }).first()).toBeVisible();
+  // the Library has loaded (its phone layout has no "Library" heading)
+  await expect(page.getByRole('searchbox', { name: 'Search samples' })).toBeVisible();
   await expect(page).toHaveTitle('Library — Audio Splitter', { timeout: 2000 });
 });
 
 test('deleting the open job from the jobs list leaves its page', async ({ page, api }) => {
-  test.fail(true, 'The job view stops polling once a job has ended and ignores "jobs changed", so it keeps offering Retry/Delete for a deleted job ("Task not found") — frontend/src/components/jobs/JobView.jsx:21-24, JobsPane.jsx:339');
   const [id] = await seedCancelled(api, [`${uid()}.wav`]);
   await page.goto(`/#/split/job/${id}`);
   const alert = main(page).getByRole('alert').filter({ hasText: 'Cancelled — ' });
@@ -333,7 +343,6 @@ test('job names in single-line rows are 44 px touch targets', async ({ page, api
   const [id] = await seedCancelled(api, [name]);
   await page.goto('/#/split');
   test.skip(await isNarrow(page), 'two-line rows stretch the name link over the whole row');
-  test.fail(true, 'The name link of a single-line row is ~25 px tall on touch (Open is 44 px); only the narrow tier stretches it — frontend/src/components/jobs/JobRow.jsx:239');
   const link = jobRow(page, id).getByRole('link', { name, exact: true });
   const box = await link.boundingBox();
   expect(box.height).toBeGreaterThanOrEqual(44);

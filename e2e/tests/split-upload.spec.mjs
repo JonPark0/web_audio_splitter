@@ -409,10 +409,9 @@ test.describe('YouTube link', () => {
   });
 });
 
-// ---- known bugs: these assert the right behaviour and are expected to fail until fixed ----
+// ---- fixed bugs: regression tests (they were marked test.fail until the fix) ----
 
 test('the status line reports a file the server refused', async ({ page }) => {
-  test.fail(true, 'Batch summary ignores refused files when 0 or 1 files succeeded ("Add audio files first" / "Queued …") — frontend/src/components/UploadScreen.jsx:231-238');
   const u = uid();
   await page.goto('/#/split');
   await fileInput(page).setInputFiles(asFile(media('not-audio.mp3'), `${u}.mp3`));
@@ -425,7 +424,6 @@ test('the status line reports a file the server refused', async ({ page }) => {
 test('focus stays in the YouTube link field after a refused link', async ({ page, browserName }) => {
   test.skip(page.viewportSize().width < 640, 'phones put the keyboard away on purpose');
   test.skip(browserName === 'firefox', 'unverified: Firefox may keep focus on a disabled field');
-  test.fail(true, 'The link field is disabled while checking, so focus drops to <body> and is never put back — frontend/src/components/UploadScreen.jsx:429 (and :211-213)');
   await page.goto('/#/split');
   await splitForm(page).getByRole('radiogroup', { name: 'Source' }).getByText('YouTube').click();
   const link = splitForm(page).getByLabel('Link', { exact: true });

@@ -31,6 +31,13 @@ function Screen({ route }) {
   return <SplitHome />;
 }
 
+// Renders nothing; it comes before <main> so that its layout effects (the
+// scroll for a new screen) run before the screen's own (see useRouteFocus).
+function RouteFocus({ path }) {
+  useRouteFocus(path);
+  return null;
+}
+
 function Loading() {
   return <p className="m-0 py-4 text-caption text-muted">Loading...</p>;
 }
@@ -44,7 +51,6 @@ export default function App() {
   const isJobRoute = route.section === 'split' && route.segments[0] === 'job';
 
   useEffect(() => rememberRoute(route), [route]);
-  useRouteFocus(route.path);
 
   // The job view titles itself with its progress; everything else is named
   // after its section.
@@ -75,6 +81,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-paper">
+      <RouteFocus path={route.path} />
       <button
         type="button"
         className="link sr-only text-caption focus:not-sr-only focus:fixed focus:left-[max(1rem,env(safe-area-inset-left))] focus:top-14 focus:z-50 focus:bg-paper"

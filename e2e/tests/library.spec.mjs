@@ -436,7 +436,6 @@ test.describe('known bugs', () => {
   });
 
   test('coming back through the header tab restores the list scroll', async ({ page, paging }) => {
-    test.fail(true, 'the Library restores its scroll in a layout effect, then useRouteFocus scrolls the new history entry to the top (frontend/src/components/shell/useRouteFocus.js:131 vs LibraryScreen.jsx:511)');
     await prefs(page, { 'library:auto': false });
     const ui = await openLibrary(page, `tags=${paging.tag}`);
     const target = rows(page).nth(60);
@@ -447,7 +446,10 @@ test.describe('known bugs', () => {
     const y = await page.evaluate(() => window.scrollY);
     expect(y).toBeGreaterThan(500);
     const nav = page.getByRole('navigation', { name: 'Sections' });
-    await nav.getByRole('link', { name: 'Split', exact: true }).click();
+    // click the tab where it is: locator.click() first scrolls the sticky
+    // header's link "into view", which moves the page before it is left
+    const split = await nav.getByRole('link', { name: 'Split', exact: true }).boundingBox();
+    await page.mouse.click(split.x + split.width / 2, split.y + split.height / 2);
     await expect(page).toHaveURL(/#\/split/);
     await nav.getByRole('link', { name: 'Library', exact: true }).click();
     await expect(rowById(page, id)).toHaveAttribute('aria-selected', 'true');
