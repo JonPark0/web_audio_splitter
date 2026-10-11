@@ -88,21 +88,22 @@ test('with a sample armed, a tap that stops a fling places nothing', async ({ pa
 
 test('a vertical swipe that starts on a trim handle scrolls the lanes and trims nothing', async ({ page, api, world, browserName }) => {
   cdpOnly(browserName);
-  test.fail(true, 'touch trim handles are touch-action: none and take any drag, so the lanes cannot scroll from there - Timeline.jsx:901');
   await openProject(page, api, world);
   await selectClip(page, 2);
   const handle = page.locator('[data-handle="trim"]').first();
   const h = await handle.boundingBox();
   const width0 = await page.locator('[data-clip][aria-pressed="true"]').evaluate((el) => el.style.width);
   const top0 = (await scroll(page)).top;
-  await (await touch(page)).swipe({ x: h.x + h.width / 2, y: h.y + h.height * 0.7 }, { x: h.x + h.width / 2 + 2, y: h.y + h.height * 0.7 - 150 });
+  // a landscape phone shows only the handle's top: start where it is in view, not under the bottom bar
+  const sc = await timeline(page).boundingBox();
+  const y = Math.min(h.y + h.height * 0.7, sc.y + sc.height - 8);
+  await (await touch(page)).swipe({ x: h.x + h.width / 2, y }, { x: h.x + h.width / 2 + 2, y: y - 150 });
   await expect.poll(async () => (await scroll(page)).top, { timeout: 3000 }).toBeGreaterThan(top0 + 30);
   expect(await page.locator('[data-clip][aria-pressed="true"]').evaluate((el) => el.style.width)).toBe(width0);
 });
 
 test('a vertical swipe that starts on the ruler or a loop handle moves neither the playhead nor the loop', async ({ page, api, world, browserName }) => {
   cdpOnly(browserName);
-  test.fail(true, 'the ruler and its loop handles only count sideways travel as a drag (and pan only sideways), so a vertical swipe there is a tap that seeks - arrange/ui/Ruler.jsx:169, :138, touch-action :227/:274');
   await openProject(page, api, world, { loop: { enabled: true, start_beat: 0, end_beat: 8 } });
   const g = await geometry(page);
   const t = await touch(page);

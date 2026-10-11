@@ -1,9 +1,7 @@
 import React, { memo, useRef, useState } from 'react';
-import { dragSession, followPointer, onTapClick, releaseFocus } from './pointerDrag';
+import { DRAG_THRESHOLD_PX, TOUCH_SLOP_PX, dragSession, followPointer, onTapClick, releaseFocus, sidewaysTouch } from './pointerDrag';
 import { RULER_HEIGHT, RULER_HEIGHT_TOUCH, beatToPx, pxToBeat, snapBeat } from './snap';
 
-const DRAG_THRESHOLD_PX = 3;
-const TOUCH_SLOP_PX = 8;
 const MIN_LABEL_GAP_PX = 36;
 
 /**
@@ -64,7 +62,8 @@ function MarkerFlag({ marker, left, onSeek, onRename }) {
 /**
  * Bar/beat ruler. Click/tap seeks (snapped). The loop region has a handle
  * at each edge to drag (snapped); with a mouse, dragging across empty ruler
- * draws a new loop. On touch a swipe scrolls instead — no accidental loops.
+ * draws a new loop. On touch a swipe scrolls instead — no accidental loops —
+ * and a loop handle drags sideways only (a vertical swipe from it scrolls).
  * Markers sit on top: click to jump, double-click to rename. While a pen is
  * in use (`pen`, see Timeline) the ruler doesn't pan, so a pen draws loops.
  *
@@ -104,9 +103,13 @@ export default memo(function Ruler({
     return Math.max(0, pxToBeat(clientX - rect.left, pxPerBeat));
   };
 
-  // One pointer's drag: `move(clientX)` returns true once under way.
+  // One drag's hold on the timeline: `move(clientX)` returns true once under way.
+  const session = (move) =>
+    dragSession({ scroller: scrollRef?.current, claim, inset: { left: headerWidth }, axes: { y: false } }, (cx) => move(cx));
+
+  // One pointer's drag from its pointerdown.
   const drag = (e, move, up) => {
-    const s = dragSession({ scroller: scrollRef?.current, claim, inset: { left: headerWidth }, axes: { y: false } }, (cx) => move(cx));
+    const s = session(move);
     if (!s) return false;
     followPointer(e, {
       move: (ev) => s.move(ev.clientX, ev.clientY),
@@ -123,36 +126,43 @@ export default memo(function Ruler({
     return true;
   };
 
-  // Loop edge drag (mouse or touch).
+  // Loop edge drag: mouse and pen at once, a finger once it goes sideways.
   const onEdgeDown = (e, edge) => {
     if (e.button !== 0 || !hasLoop) return;
-    e.preventDefault();
     e.stopPropagation();
     releaseFocus();
     let cur = { start: loop.start_beat, end: loop.end_beat };
     const x0 = e.clientX;
     let moved = false;
-    drag(
-      e,
-      (cx) => {
-        if (!moved && Math.abs(cx - x0) < DRAG_THRESHOLD_PX) return false;
-        moved = true;
-        const b = snapBeat(beatAt(cx), step);
-        cur =
-          edge === 'start'
-            ? { start: Math.min(Math.max(0, b), loop.end_beat - minLen), end: loop.end_beat }
-            : { start: loop.start_beat, end: Math.max(b, loop.start_beat + minLen) };
-        setDraft(cur);
-        return true;
-      },
-      () => {
-        // A click on a handle (no drag) still moves the playhead there.
-        if (!moved) onSeek(snapBeat(beatAt(x0), step, 'round'));
-        else if (cur.start !== loop.start_beat || cur.end !== loop.end_beat) {
-          onLoopChange({ ...loop, start_beat: cur.start, end_beat: cur.end });
-        }
-      }
-    );
+    const move = (cx) => {
+      if (!moved && Math.abs(cx - x0) < DRAG_THRESHOLD_PX) return false;
+      moved = true;
+      const b = snapBeat(beatAt(cx), step);
+      cur =
+        edge === 'start'
+          ? { start: Math.min(Math.max(0, b), loop.end_beat - minLen), end: loop.end_beat }
+          : { start: loop.start_beat, end: Math.max(b, loop.start_beat + minLen) };
+      setDraft(cur);
+      return true;
+    };
+    // A click / tap on a handle (no drag) still moves the playhead there.
+    const seek = () => onSeek(snapBeat(beatAt(x0), step, 'round'));
+    const commit = () => {
+      if (cur.start !== loop.start_beat || cur.end !== loop.end_beat) onLoopChange({ ...loop, start_beat: cur.start, end_beat: cur.end });
+    };
+    if (e.pointerType === 'touch') {
+      sidewaysTouch(e, {
+        start: () => session(move),
+        end: (ok) => {
+          setDraft(null);
+          if (ok) commit();
+        },
+        tap: seek,
+      });
+      return;
+    }
+    e.preventDefault();
+    drag(e, move, () => (moved ? commit() : seek()));
   };
 
   const onPointerDown = (e) => {
@@ -162,12 +172,13 @@ export default memo(function Ruler({
     const anchor = beatAt(x0);
     if (e.pointerType === 'touch') {
       // Tap seeks (on its click: not a tap that stops a fling); anything
-      // that moves is the browser's horizontal scroll. Not while another
+      // that moves, either way, is the browser's scroll. Not while another
       // finger drags something (a palm, a stray thumb).
+      const y0 = e.clientY;
       let moved = false;
       followPointer(e, {
         move: (ev) => {
-          if (Math.abs(ev.clientX - x0) > TOUCH_SLOP_PX) moved = true;
+          if (Math.hypot(ev.clientX - x0, ev.clientY - y0) > TOUCH_SLOP_PX) moved = true;
         },
         up: () => {
           if (moved) return;
@@ -228,7 +239,7 @@ export default memo(function Ruler({
       onPointerDown={onPointerDown}
       title={coarse ? 'Tap to move the playhead · drag the loop handles' : 'Click to move the playhead · drag to set the loop'}
       className="relative cursor-pointer select-none border-b border-ink text-caption"
-      style={{ height, touchAction: pen ? 'none' : 'pan-x' }}
+      style={{ height, touchAction: pen ? 'none' : 'pan-x pan-y' }}
     >
       {/* Loop region: an enabled loop is the wash fill under an ink top edge;
           a disabled one keeps only its hairline ends. */}
@@ -275,7 +286,7 @@ export default memo(function Ruler({
               aria-valuenow={edge === 'start' ? shownLoop.start : shownLoop.end}
               onPointerDown={(e) => onEdgeDown(e, edge)}
               className="absolute -bottom-px top-0 z-20 flex cursor-ew-resize justify-center"
-              style={{ left: x - edgeHit / 2, width: edgeHit, touchAction: 'none' }}
+              style={{ left: x - edgeHit / 2, width: edgeHit, touchAction: pen ? 'none' : 'pan-y' }}
             >
               <span className={`block h-full w-[3px] ${shownLoop.enabled ? 'bg-ink' : 'bg-muted'}`} />
             </div>
