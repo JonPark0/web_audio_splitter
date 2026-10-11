@@ -1,5 +1,5 @@
 // Pointer plumbing shared by the timeline's drags (clips, handles, selection
-// box, placement, loop edges on the ruler).
+// box, placement, loop edges and markers on the ruler).
 
 export const DRAG_THRESHOLD_PX = 3;
 export const TOUCH_SLOP_PX = 8; // finger movement that still counts as a tap / press

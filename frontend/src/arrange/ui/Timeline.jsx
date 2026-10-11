@@ -119,6 +119,7 @@ export default forwardRef(function Timeline(
     onSeek,
     onLoopChange,
     onRenameMarker,
+    onMoveMarker,
     onViewWidth,
   },
   ref
@@ -973,6 +974,7 @@ export default forwardRef(function Timeline(
               onSeek={onSeek}
               onLoopChange={onLoopChange}
               onRenameMarker={onRenameMarker}
+              onMoveMarker={onMoveMarker}
             />
             <Playhead clock={clock} pxPerBeat={pxPerBeat} scrollRef={scrollRef} headerWidth={headerWidth} follow={false} marker />
           </div>
