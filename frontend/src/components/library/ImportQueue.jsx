@@ -9,6 +9,13 @@ import { COARSE, TOUCH_TEXT } from './ui';
 let nextId = 1;
 const stem = (file) => file.name.replace(/\.[^.]+$/, '');
 
+// The sample's tags plus `tags`, or null when it has them all.
+function mergeTags(sample, tags) {
+  const have = sample.tags || [];
+  const merged = [...new Set([...have, ...tags])];
+  return merged.length === have.length ? null : merged;
+}
+
 /**
  * Sequential import queue (P6): any number of files, one upload at a time
  * with byte progress, then the server's conversion. Optional tags apply to
@@ -42,19 +49,35 @@ export function useImportQueue({ onImported, onPatched, onDrained }) {
     const controller = new AbortController();
     controllers.current.set(item.id, controller);
     update(item.id, { status: 'uploading', progress: 0 });
+    let sent = tagsRef.current;
     importSample({
       file: item.file,
       name: item.name.trim() || undefined,
-      tags: tagsRef.current,
+      tags: sent,
       signal: controller.signal,
       onProgress: ({ loaded, total }) => {
         const progress = total ? loaded / total : 0;
         update(item.id, progress >= 1 ? { progress: 1, status: 'processing' } : { progress });
       },
     })
-      .then((res) => {
-        update(item.id, { status: 'done', progress: 1, sample: res.data });
-        cb.current.onImported?.(res.data);
+      .then(async (res) => {
+        let sample = res.data;
+        let error = null;
+        // Tags typed while it was on its way: it went with the old ones, and
+        // setBatchTags only reaches files that are done.
+        while (sent !== tagsRef.current) {
+          sent = tagsRef.current;
+          const merged = mergeTags(sample, sent);
+          if (!merged) continue;
+          try {
+            sample = (await updateSample(sample.id, { tags: merged })).data;
+          } catch (err) {
+            error = errorMessage(err, 'Could not tag it');
+            break;
+          }
+        }
+        update(item.id, { status: 'done', progress: 1, sample, error });
+        cb.current.onImported?.(sample);
       })
       .catch((err) => {
         if (controller.signal.aborted) update(item.id, { status: 'cancelled' });
@@ -94,8 +117,8 @@ export function useImportQueue({ onImported, onPatched, onDrained }) {
       // files that already landed get them too
       for (const it of items) {
         if (it.status !== 'done' || !it.sample) continue;
-        const merged = [...new Set([...(it.sample.tags || []), ...tags])];
-        if (merged.length === (it.sample.tags || []).length) continue;
+        const merged = mergeTags(it.sample, tags);
+        if (!merged) continue;
         try {
           const res = await updateSample(it.sample.id, { tags: merged });
           update(it.id, { sample: res.data });

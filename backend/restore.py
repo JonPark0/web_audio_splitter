@@ -57,7 +57,7 @@ FLASHSR_REPO_ID = os.getenv("FLASHSR_REPO_ID", "jakeoneijk/FlashSR_weights")
 SUPPORTED_MODELS = ("apollo", "audiosr", "flashsr")
 DEFAULT_MODEL = "apollo"
 
-# Lines of subprocess output kept for the error message on failure.
+# Lines of subprocess output kept for the server log on failure.
 ERROR_TAIL_LINES = 40
 
 
@@ -69,6 +69,16 @@ class RestoreError(RuntimeError):
     def __init__(self, message: str, stem: Optional[str] = None):
         super().__init__(message)
         self.stem = stem
+
+
+def describe_failure(output: str) -> str:
+    """A short reason from a recovery subprocess's output, for the user: its
+    last line (a traceback's "SomeError: why"), not the traceback itself."""
+    text = output or ""
+    if "out of memory" in text.lower():
+        return "the GPU ran out of memory (try a shorter file, or wait for other jobs)"
+    lines = [l.strip() for l in text.strip().splitlines() if l.strip()]
+    return lines[-1][:300] if lines else "no error output"
 
 
 def restore_stems(
@@ -138,7 +148,11 @@ def _run_batch(cmd, pairs, label, on_stem_start) -> None:
 
     stem = pairs[current][0].stem if current is not None else None
     if process.returncode != 0:
-        raise RestoreError(f"{label} restoration failed: {''.join(tail)[-2000:]}", stem=stem)
+        # The whole tail (usually a traceback) goes to the server log; the
+        # job's error, which the user sees, gets its last line.
+        output = "".join(tail)
+        print(f"{label} restoration exited with {process.returncode}:\n{output}", flush=True)
+        raise RestoreError(f"{label}: {describe_failure(output)}", stem=stem)
 
     missing = [out_path for _, out_path in pairs if not out_path.exists()]
     if missing:

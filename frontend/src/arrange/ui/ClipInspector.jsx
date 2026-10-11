@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react';
 import { FiMinus, FiPlus } from 'react-icons/fi';
 import TextButton from '../../components/TextButton';
 import { MOD } from '../../keys';
+import { useTouchSliderGuard } from '../../touchSlider';
 import { MAX_BPM, MIN_BPM, canWarp, clipDurationBeats, clipDurationSeconds, clipRate, clipRegionBeats, isLooped } from '../project';
 import { CommitField, Group, ResetValue, parseNumber } from './fields';
 import { MIN_DB, dbToGain, formatBarBeat, formatBeats, formatBpm, formatDb, gainToDb } from './snap';
@@ -179,6 +180,24 @@ function SampleBpmControl({ clip, sample, beatsPerBar, onSampleBpm, className = 
   );
 }
 
+function ClipGainSlider({ clip, patch }) {
+  const guard = useTouchSliderGuard((db) => patch({ gain: Math.min(4, Math.round(dbToGain(db) * 10000) / 10000) }, { coalesce: `gain:${clip.id}` }));
+  return (
+    <input
+      type="range"
+      min={MIN_DB}
+      max="12"
+      step="0.5"
+      value={gainToDb(clip.gain)}
+      {...guard}
+      onDoubleClick={() => patch({ gain: 1 })}
+      className="slider w-auto min-w-0 flex-1 coarse:h-11"
+      aria-label="Clip gain"
+      aria-valuetext={formatDb(clip.gain)}
+    />
+  );
+}
+
 function ClipActions({ onDuplicate, onDuplicateNextBar, onSplit, onDelete, compact }) {
   return (
     <div className={`flex flex-wrap items-center ${compact ? 'gap-x-4' : 'gap-x-5'} gap-y-1 text-caption`}>
@@ -330,18 +349,7 @@ export default function ClipInspector({
         <PitchControl clips={[clip]} onApply={onPatchClips} className={sheet ? 'col-span-2' : ''} />
 
         <Group label="Gain" title="Clip gain (double-click the slider or tap the value to reset)" className={sheet ? '' : 'w-44'}>
-          <input
-            type="range"
-            min={MIN_DB}
-            max="12"
-            step="0.5"
-            value={gainToDb(clip.gain)}
-            onChange={(e) => patch({ gain: Math.min(4, Math.round(dbToGain(parseFloat(e.target.value)) * 10000) / 10000) }, { coalesce: `gain:${clip.id}` })}
-            onDoubleClick={() => patch({ gain: 1 })}
-            className="slider w-auto min-w-0 flex-1 coarse:h-11"
-            aria-label="Clip gain"
-            aria-valuetext={formatDb(clip.gain)}
-          />
+          <ClipGainSlider clip={clip} patch={patch} />
           <ResetValue onReset={() => patch({ gain: 1 })} label="Reset clip gain to 0 dB">
             {formatDb(clip.gain)}
           </ResetValue>

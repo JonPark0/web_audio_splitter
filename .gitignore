@@ -11,3 +11,8 @@ backend/media/
 *.md
 !README.md
 !README_ko.md
+
+# UI tests (e2e/): generated media, per-worker backends, reports
+e2e/.cache/
+e2e/test-results/
+e2e/playwright-report/

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useLayoutEffect, useRef } from 'react';
 import { parseHash } from '../../router';
 
 /**
@@ -15,6 +15,11 @@ import { parseHash } from '../../router';
  * has rendered — so it's off, and positions are kept here per history entry:
  * each entry carries a key in history.state and its position is recorded as
  * you scroll, so Back, which gives no warning, loses nothing.
+ *
+ * Its effects are layout effects, and App runs the hook in a component that
+ * comes before <main>: React runs layout effects in tree order, so a new
+ * screen is sent to the top before the screen's own layout effects run, and
+ * one that puts back its own scroll (the Library's list) keeps it.
  */
 
 const STORE_KEY = 'audioSplitter.scroll';
@@ -22,6 +27,11 @@ const positions = new Map(); // history entry key -> scrollY
 let currentKey = null; // the entry whose position scrolling records
 let settling = false; // its position is still being set
 let arrival = null; // { id, at }: heading to show instead of the top (revealOnArrival)
+
+const SETTLE_FRAMES = 60; // ~1 s to place the scroll and find a heading
+// How long a focused heading is watched: a screen may swap a placeholder
+// heading for the real one (a job's name, then its stems screen).
+const WATCH_FRAMES = 300;
 
 function stateObject() {
   const state = window.history.state;
@@ -92,7 +102,7 @@ export default function useRouteFocus(path, mainId = 'main') {
   // history.state still names it: once the URL moves on, the scroll that the
   // next screen's render causes (a shorter page clamps it) isn't the old
   // entry's, whichever of React's update and this file's code runs first.
-  useEffect(() => {
+  useLayoutEffect(() => {
     try {
       window.history.scrollRestoration = 'manual';
     } catch (e) {
@@ -117,7 +127,7 @@ export default function useRouteFocus(path, mainId = 'main') {
     };
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     let p = plan.current;
     if (p?.path !== path) {
       const isFirst = !p;
@@ -126,12 +136,13 @@ export default function useRouteFocus(path, mainId = 'main') {
       const y = positions.get(currentKey) || null;
       const target = !isFirst && arrival && Date.now() - arrival.at < 1000 ? arrival.id : null;
       arrival = null;
-      p = { path, y, target, placed: !y && !target, focused: isFirst, frames: 0 };
+      p = { path, y, target, placed: !y && !target, focused: isFirst, heading: null, frames: 0, until: SETTLE_FRAMES };
       plan.current = p;
       if (p.placed && !isFirst) window.scrollTo(0, 0);
       settling = !p.placed;
     }
-    if (p.placed && p.focused) return undefined;
+    const pending = () => !p.placed || !p.focused || (!!p.heading && p.frames < WATCH_FRAMES);
+    if (!pending()) return undefined;
 
     const settle = () => {
       p.placed = true;
@@ -147,7 +158,7 @@ export default function useRouteFocus(path, mainId = 'main') {
 
     let raf = 0;
     const tick = () => {
-      const last = ++p.frames >= 60;
+      const last = ++p.frames >= SETTLE_FRAMES;
       if (!p.placed) {
         if (p.target) {
           if (revealHeading(p.target)) {
@@ -162,6 +173,15 @@ export default function useRouteFocus(path, mainId = 'main') {
           settle();
         }
       }
+      // The heading that got focus was replaced (or hidden) and took focus
+      // with it to <body>: look for the new one.
+      const active = document.activeElement;
+      const lost = p.heading && (!p.heading.isConnected || !p.heading.getClientRects().length);
+      if (lost && (!active || active === document.body)) {
+        p.heading = null;
+        p.focused = false;
+        p.until = p.frames + 2 * SETTLE_FRAMES;
+      }
       if (!p.focused) {
         const main = document.getElementById(mainId);
         // While a lazy screen loads, Suspense keeps the previous screen in
@@ -170,12 +190,13 @@ export default function useRouteFocus(path, mainId = 'main') {
         if (heading) {
           focusQuietly(heading);
           p.focused = true;
-        } else if (last && main) {
-          main.focus({ preventScroll: true });
+          p.heading = heading;
+        } else if (p.frames >= p.until) {
+          main?.focus({ preventScroll: true });
           p.focused = true;
         }
       }
-      if (!last && (!p.placed || !p.focused)) raf = requestAnimationFrame(tick);
+      if (pending()) raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => {

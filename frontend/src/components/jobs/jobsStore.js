@@ -59,16 +59,21 @@ export function jobsChanged() {
   refreshListeners.forEach((fn) => fn());
 }
 
-// The jobs list's last rows and how many were loaded, for one filter. A
-// remount (Back to the Split home, opening a job) shows them at once at that
-// length while the poll refreshes them — so the position Back restores
-// exists again, instead of "Loading jobs..." and only the first page.
-let listCache = null; // { key, rows, limit, hasMore }
+// The jobs list's last rows and how many were loaded, per filter. A remount
+// (Back to the Split home, opening a job) shows them at once at that length
+// while the poll refreshes them — so the position Back restores exists
+// again, instead of "Loading jobs..." and only the first page. Several
+// filters are kept: a job page's own (unfiltered) list must not replace the
+// searched list that Back returns to.
+const CACHED_LISTS = 4;
+const listCache = new Map(); // key -> { key, rows, limit, hasMore }, oldest first
 
 export function cachedJobsList(key) {
-  return listCache?.key === key ? listCache : null;
+  return listCache.get(key) || null;
 }
 
 export function cacheJobsList(entry) {
-  listCache = entry;
+  listCache.delete(entry.key);
+  listCache.set(entry.key, entry);
+  if (listCache.size > CACHED_LISTS) listCache.delete(listCache.keys().next().value);
 }

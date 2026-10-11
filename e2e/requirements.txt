@@ -1,0 +1,19 @@
+# Backend dependencies for the UI tests: everything the app needs except the
+# separation/recovery ML stack (torch, demucs, audiosr, Apollo, FlashSR,
+# BS-Roformer), which the tests replace with e2e/bin/*. numpy/librosa are
+# pinned to what the Docker image resolves (audiosr 0.0.7 pins
+# numpy<=1.23.5 and librosa==0.9.2) so analysis behaves the same as in the
+# image. Python 3.11, like backend/Dockerfile.
+fastapi
+uvicorn
+python-multipart
+soundfile
+yt-dlp
+numpy==1.23.5
+librosa==0.9.2
+numba<0.58
+resampy
+sqlalchemy>=2.0,<2.1
+psycopg[binary]>=3.2,<4
+alembic>=1.13,<2
+pedalboard==0.9.16

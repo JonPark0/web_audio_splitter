@@ -6,6 +6,20 @@ const TOUCH_SLOP = 8; // a finger wobbles more than a mouse
 const HOLD_MS = 300; // a held finger may then drag in any direction
 
 /**
+ * Two-finger pinch on a time axis (a lane or the ruler: its left edge is the
+ * timeline's x = 0), fingers at a and b ({ x, y } client px). The time under
+ * their midpoint stays under it while their spread scales the zoom. Returns
+ * the update to call with the fingers' new positions.
+ */
+export function pinchZoom(timeline, axis, a, b) {
+  const left = axis.getBoundingClientRect().left;
+  const d0 = Math.max(16, Math.hypot(a.x - b.x, a.y - b.y));
+  const t0 = timeline.timeAt((a.x + b.x) / 2 - left);
+  const pps0 = timeline.get().pps;
+  return (p, q) => timeline.zoomTo((pps0 * Math.hypot(p.x - q.x, p.y - q.y)) / d0, t0, (p.x + q.x) / 2 - left);
+}
+
+/**
  * Pointer gestures for a container of lanes ([data-lane] elements that share
  * the timeline's width):
  *
@@ -21,7 +35,9 @@ const HOLD_MS = 300; // a held finger may then drag in any direction
  *   wheel      horizontal or Shift = pan when zoomed · plain vertical = page
  *              scroll · Ctrl/⌘ zoom is useZoomGestures (whole mixer)
  *
- * Selection updates during a drag are coalesced to one per frame (B8).
+ * Selection updates during a drag are coalesced to one per frame (B8). A
+ * drag the browser cancels (pointercancel: it took the touch over) puts the
+ * selection back as it was: onSelect(before, 'cancel').
  * opts: { timeline, getSelection, onSelect(sel, phase), onSeek(t, track),
  *         onMarker(id), snap(sel, movingEdge, track) }
  */
@@ -70,10 +86,7 @@ export default function useLaneGestures(ref, opts, deps = []) {
       const [a, b] = [...touches.values()];
       const lane = laneOf(document.elementFromPoint((a.x + b.x) / 2, (a.y + b.y) / 2)) || g?.lane || el.querySelector('[data-lane]');
       if (!lane) return;
-      const left = lane.getBoundingClientRect().left;
-      const tl = o().timeline;
-      const cx = (a.x + b.x) / 2 - left;
-      g = { mode: 'pinch', left, d0: Math.max(16, Math.hypot(a.x - b.x, a.y - b.y)), t0: tl.timeAt(cx), pps0: tl.get().pps };
+      g = { mode: 'pinch', zoom: pinchZoom(o().timeline, lane, a, b) };
       pending = null;
     }
 
@@ -96,7 +109,7 @@ export default function useLaneGestures(ref, opts, deps = []) {
       const handle = e.target.closest('[data-handle]');
       const grab = e.target.closest('[data-grab]');
       const marker = e.target.closest('[data-marker]');
-      const base = { lane, id: e.pointerId, x0: e.clientX, y0: e.clientY, at: e.timeStamp, touch: e.pointerType === 'touch' };
+      const base = { lane, id: e.pointerId, x0: e.clientX, y0: e.clientY, at: e.timeStamp, touch: e.pointerType === 'touch', before: sel };
       if (handle && sel) {
         const edge = handle.dataset.handle;
         // off: where in the handle it was grabbed, so the edge doesn't jump
@@ -127,9 +140,7 @@ export default function useLaneGestures(ref, opts, deps = []) {
       if (touches.has(e.pointerId)) touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (g?.mode === 'pinch') {
         const [a, b] = [...touches.values()];
-        if (!a || !b) return;
-        const d = Math.hypot(a.x - b.x, a.y - b.y);
-        o().timeline.zoomTo((g.pps0 * d) / g.d0, g.t0, (a.x + b.x) / 2 - g.left);
+        if (a && b) g.zoom(a, b);
         return;
       }
       if (!g || e.pointerId !== g.id) return;
@@ -202,12 +213,22 @@ export default function useLaneGestures(ref, opts, deps = []) {
     }
 
     function onCancel(e) {
-      touches.delete(e.pointerId);
+      const finger = touches.delete(e.pointerId);
       if (!g) return;
-      if (g.mode === 'pinch' && touches.size >= 2) return;
-      const wasDrag = g.mode === 'select' || g.mode === 'edge' || g.mode === 'move';
+      if (g.mode === 'pinch') {
+        if (finger && touches.size < 2) g = null;
+        return;
+      }
+      // Another pointer (a palm on the controls) losing its capture isn't ours.
+      if (e.pointerId !== g.id) return;
+      const done = g;
       g = null;
-      if (wasDrag) commit();
+      if (done.mode === 'select' || done.mode === 'edge' || done.mode === 'move') {
+        cancelAnimationFrame(frame);
+        frame = 0;
+        pending = null;
+        o().onSelect(done.before, 'cancel');
+      }
     }
 
     function onWheel(e) {

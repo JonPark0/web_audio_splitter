@@ -1,3 +1,5 @@
 # Shell scripts run inside Linux containers: keep LF even on a Windows
 # checkout (core.autocrlf), or /bin/sh fails on the stray carriage returns.
 *.sh text eol=lf
+# Test stand-ins for the separation CLIs (no extension): same reason.
+e2e/bin/* text eol=lf

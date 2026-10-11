@@ -6,7 +6,10 @@ import JobsPane from './JobsPane';
  * /split: "New split" and the live Jobs list.
  * - desktop (≥1024): two panes; the form is a sticky 480 px column (520 at
  *   ≥1800) with a hairline between, the jobs list takes the rest.
- * - tablet: the form as a compact two-column grid, then the jobs.
+ * - tablet: the form as a compact two-column grid, then the jobs. By width
+ *   (sm:), not device.js, so a landscape phone gets it too, on purpose: on a
+ *   ~350 px tall screen the two columns keep the CTA on the first screen,
+ *   where the phone's fixed bar would take about a fifth of it for good.
  * - phone: the compact form, its CTA in a fixed bottom bar, then the jobs
  *   (the page pads its bottom by the bar's measured height so the bar never
  *   hides the last row).

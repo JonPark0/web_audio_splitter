@@ -849,6 +849,13 @@ export default function ArrangeScreen() {
     },
     [setMeta]
   );
+  const moveMarker = useCallback(
+    (id, beat) => {
+      const p = projectRef.current;
+      if (p) setMeta({ markers: p.markers.map((m) => (m.id === id ? { ...m, beat } : m)).sort((a, b) => a.beat - b.beat) });
+    },
+    [setMeta]
+  );
   const deleteMarker = useCallback(
     (id) => {
       const p = projectRef.current;
@@ -1160,13 +1167,16 @@ export default function ArrangeScreen() {
     </span>
   );
 
+  // Phone: above the bottom bar (z-40), which would otherwise cover the
+  // lower part of the Projects menu and the Export popover; sheets (z-50)
+  // still open over both.
   const toolbar = phone ? (
-    <div className="sticky top-12 z-20 flex h-10 items-center gap-3 border-b border-line bg-paper">
+    <div className="sticky top-12 z-[41] flex h-10 items-center gap-3 border-b border-line bg-paper">
       <ProjectPicker {...pickerProps} className="min-w-0 flex-1" />
       {saveIndicator}
       {project && samplesButton}
       {project && (
-        <ExportControl project={project} exporting={exporting} progress={exportProgress} disabled={busy} onExport={doExport} />
+        <ExportControl project={project} exporting={exporting} progress={exportProgress} disabled={busy} onExport={doExport} compact={short} />
       )}
     </div>
   ) : (
@@ -1336,6 +1346,7 @@ export default function ArrangeScreen() {
               onSeek={seek}
               onLoopChange={setLoop}
               onRenameMarker={renameMarker}
+              onMoveMarker={moveMarker}
               onViewWidth={setViewWidth}
             />
           </div>

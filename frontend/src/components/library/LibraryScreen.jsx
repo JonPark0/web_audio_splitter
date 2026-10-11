@@ -262,7 +262,12 @@ export default function LibraryScreen() {
     const el = document.querySelector(`[data-library-list] [data-id="${CSS.escape(id)}"]`);
     if (el) {
       el.focus({ preventScroll: true });
-      el.scrollIntoView({ block: 'nearest' });
+      // 'nearest' alone leaves a row under the sticky bars where it is:
+      // Chromium tests it against the root's 56 px scroll-padding, not its
+      // scroll-margin. A covered row aligns to the top (scroll-margin) instead.
+      const head = document.querySelector('[data-library-list] > [role=row]');
+      const top = head ? head.getBoundingClientRect().bottom : HEADER_PX + PHONE_BAR_PX;
+      el.scrollIntoView({ block: el.getBoundingClientRect().top < top ? 'start' : 'nearest' });
     }
   };
 
@@ -928,6 +933,8 @@ export default function LibraryScreen() {
 
   return (
     <div ref={rootRef} className={`flex w-full flex-col ${bottomBar ? 'pb-16' : ''}`}>
+      {/* The phone bar has no count heading: route focus and screen readers need one. */}
+      {phone && <h2 className="sr-only">Library</h2>}
       {toolbar}
       <input
         ref={fileInputRef}

@@ -1,0 +1,24 @@
+#!/bin/sh
+# Test stand-in for bs-roformer-infer (see ./demucs): `--input_folder IN
+# --store_dir OUT` writes OUT/<name>_<stem>.wav for the six stems plus the
+# derived instrumental. Honours the same fake-sep-delay / fake-sep-fail files.
+in=; out=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --input_folder) in=$2; shift 2;;
+    --store_dir) out=$2; shift 2;;
+    *) shift;;
+  esac
+done
+delay=$(cat fake-sep-delay 2>/dev/null || echo 2)
+sleep "$delay"
+if [ -f fake-sep-fail ]; then
+  echo "RuntimeError: separation failed (fake-sep-fail)" >&2
+  exit 1
+fi
+for f in "$in"/*.wav; do
+  n=$(basename "$f" .wav)
+  for s in vocals drums bass guitar piano other instrumental; do
+    ffmpeg -nostdin -y -loglevel error -i "$f" -ac 2 -ar 44100 -af "volume=0.5" -c:a pcm_s16le "$out/${n}_$s.wav" || exit 1
+  done
+done

@@ -1,4 +1,5 @@
 import React, { useRef } from 'react';
+import { useTouchSliderGuard } from '../../touchSlider';
 import { MAX_DB, MIN_DB, fmtDb } from './format';
 
 /**
@@ -21,13 +22,19 @@ export default function Fader({ db, onChange, label, className = '', showValue =
   const grab = () => {
     dragging.current = true;
     const release = () => {
-      dragging.current = false;
       window.removeEventListener('pointerup', release, true);
       window.removeEventListener('pointercancel', release, true);
+      // Firefox sets the value once more on mouseup, after pointerup: without
+      // the detent that release left the fader at ±0.5 instead of 0.
+      setTimeout(() => {
+        dragging.current = false;
+      });
     };
     window.addEventListener('pointerup', release, true);
     window.addEventListener('pointercancel', release, true);
   };
+  // A swipe that starts on the fader scrolls the page instead of moving it.
+  const guard = useTouchSliderGuard(set, { onPointerDown: grab });
   return (
     <div className={`flex min-w-0 items-center gap-2 ${className}`}>
       <input
@@ -36,8 +43,7 @@ export default function Fader({ db, onChange, label, className = '', showValue =
         max={MAX_DB}
         step="0.5"
         value={db}
-        onPointerDown={grab}
-        onChange={(e) => set(parseFloat(e.target.value))}
+        {...guard}
         onDoubleClick={() => onChange(0)}
         className="slider rs-fader min-w-0 flex-1"
         title="Level — double-click for 0 dB"
