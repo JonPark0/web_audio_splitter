@@ -221,7 +221,6 @@ test.describe('desktop', () => {
   });
 
   test('a marker can be dragged along the ruler', async ({ page, api }) => {
-    test.fail(true, 'F1: markers cannot be moved: the flag stops pointerdown and only has click/double-click (frontend/src/arrange/ui/Ruler.jsx:26, :13-60); no beat field in ProjectPanel either');
     const p = await seedProject(api, 'Marker drag', [track('T1')], { markers: [{ id: crypto.randomUUID(), beat: 2, name: 'Intro' }] });
     await openProject(page, p);
     const ppb = await pxPerBeat(page);
@@ -277,7 +276,6 @@ test.describe('desktop', () => {
 });
 
 test('a marker flag next to a loop edge stays clickable (not under the loop handle)', async ({ page, api }) => {
-  test.fail(true, 'F2: the loop handles (z-20, 12 px; 44 px on touch) cover marker flags (z-10) near a loop edge (frontend/src/arrange/ui/Ruler.jsx:273 vs :26)');
   const p = await seedProject(api, `Marker overlap ${uid()}`, [track('T1')], {
     markers: [{ id: crypto.randomUUID(), beat: 3, name: 'Chorus A' }],
     loop: { enabled: true, start_beat: 4, end_beat: 8 },

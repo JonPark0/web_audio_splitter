@@ -1,8 +1,12 @@
 // Pointer plumbing shared by the timeline's drags (clips, handles, selection
-// box, placement, loop edges on the ruler).
+// box, placement, loop edges and markers on the ruler).
 
+export const DRAG_THRESHOLD_PX = 3;
+export const TOUCH_SLOP_PX = 8; // finger movement that still counts as a tap / press
+export const LONG_PRESS_MS = 300;
 const EDGE_PX = 32; // auto-scroll zone inside the visible lanes' edges
 const EDGE_SPEED = 1200; // px/s with the pointer at (or past) the edge
+const TAP_CLICK_MS = 1000; // how long a tap's click may lag its pointerup
 
 /**
  * Window listeners for ONE pointer, from its pointerdown until it lifts.
@@ -51,6 +55,75 @@ export function followPointer(down, { move, up, cancel }) {
   window.addEventListener('keydown', onKey, true);
   window.addEventListener('blur', abort);
   return stop;
+}
+
+/**
+ * Call from a finger tap's pointerup: runs `tap()` on the click that follows.
+ * A tap that stops a fling (momentum scroll) still gets its pointerdown and
+ * pointerup, but the browser drops its click - so that click, not the
+ * pointerup, is what makes a tap. Forgotten at the next pointerdown, or when
+ * no click comes.
+ */
+export function onTapClick(tap) {
+  const onClick = () => {
+    stop();
+    tap();
+  };
+  const timer = setTimeout(stop, TAP_CLICK_MS);
+  function stop() {
+    clearTimeout(timer);
+    window.removeEventListener('click', onClick, true);
+    window.removeEventListener('pointerdown', stop, true);
+  }
+  window.addEventListener('click', onClick, true);
+  window.addEventListener('pointerdown', stop, true);
+}
+
+/**
+ * A finger on a handle that drags sideways (trim, fade, loop edge). The
+ * handle is `touch-action: pan-y`, so a vertical swipe stays the browser's
+ * scroll; the timeline isn't claimed (that would block the scroll) until
+ * the finger goes sideways. Then `start()` returns the drag's session
+ * (dragSession, null when it can't claim) and `end(commit)` closes it. A
+ * finger that lifts where it landed calls `tap()` on its click.
+ */
+export function sidewaysTouch(down, { start, end, tap }) {
+  const x0 = down.clientX;
+  const y0 = down.clientY;
+  let s = null;
+  let off = false; // scrolling (or the claim failed): not ours
+  let still = true;
+  followPointer(down, {
+    move: (ev) => {
+      if (s) {
+        s.move(ev.clientX, ev.clientY);
+        return;
+      }
+      const dx = Math.abs(ev.clientX - x0);
+      const dy = Math.abs(ev.clientY - y0);
+      if (Math.hypot(dx, dy) > TOUCH_SLOP_PX) still = false;
+      if (off) return;
+      if (dy > dx) {
+        if (dy > TOUCH_SLOP_PX) off = true;
+        return;
+      }
+      if (dx <= DRAG_THRESHOLD_PX) return;
+      s = start();
+      if (s) s.move(ev.clientX, ev.clientY);
+      else off = true;
+    },
+    up: () => {
+      if (s) {
+        s.end();
+        end(true);
+      } else if (still && !off) onTapClick(tap);
+    },
+    cancel: () => {
+      if (!s) return;
+      s.end();
+      end(false);
+    },
+  });
 }
 
 /**

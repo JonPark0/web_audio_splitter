@@ -68,7 +68,8 @@ export default function Playhead({ clock, pxPerBeat, scrollRef, headerWidth = 0,
     <div
       ref={ref}
       aria-hidden="true"
-      className={`pointer-events-none absolute left-0 z-20 w-px bg-ink will-change-transform ${marker ? 'bottom-0 h-2/3' : 'inset-y-0'}`}
+      // On the ruler, over the marker flags (z-30) as well as the loop handles.
+      className={`pointer-events-none absolute left-0 w-px bg-ink will-change-transform ${marker ? 'bottom-0 z-40 h-2/3' : 'inset-y-0 z-20'}`}
     />
   );
 }

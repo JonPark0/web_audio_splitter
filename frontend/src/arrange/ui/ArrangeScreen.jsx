@@ -849,6 +849,13 @@ export default function ArrangeScreen() {
     },
     [setMeta]
   );
+  const moveMarker = useCallback(
+    (id, beat) => {
+      const p = projectRef.current;
+      if (p) setMeta({ markers: p.markers.map((m) => (m.id === id ? { ...m, beat } : m)).sort((a, b) => a.beat - b.beat) });
+    },
+    [setMeta]
+  );
   const deleteMarker = useCallback(
     (id) => {
       const p = projectRef.current;
@@ -1339,6 +1346,7 @@ export default function ArrangeScreen() {
               onSeek={seek}
               onLoopChange={setLoop}
               onRenameMarker={renameMarker}
+              onMoveMarker={moveMarker}
               onViewWidth={setViewWidth}
             />
           </div>
