@@ -288,7 +288,6 @@ test.describe('import', () => {
   });
 
   test('batch tags reach every file of the batch, also the one uploading', async ({ page, api }) => {
-    test.fail(true, 'the file already uploading keeps the empty tag list it was sent with; setBatchTags only patches finished files (frontend/src/components/library/ImportQueue.jsx:48, :96)');
     const u = uid();
     const ui = await openLibrary(page);
     const hold = await holdFirstImport(page);

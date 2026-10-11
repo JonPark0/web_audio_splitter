@@ -97,7 +97,8 @@ export default memo(function SampleCard({ sample, selected, checked, selecting, 
             <span aria-hidden="true" className={`min-w-0 truncate ${selected ? 'weight-up' : ''}`}>
               {sample.name}
             </span>
-            <span className="pointer-events-auto">
+            {/* only the Re-analyze button takes taps; the note's text is the card's */}
+            <span className="[&_button]:pointer-events-auto">
               <StatusNote sample={sample} busy={busy} onAnalyze={() => ctx.analyze(id)} />
             </span>
           </span>

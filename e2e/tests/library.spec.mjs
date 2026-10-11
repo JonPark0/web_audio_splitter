@@ -390,7 +390,6 @@ test.describe('layout', () => {
 
 test.describe('known bugs', () => {
   test('ties in length page and order the same at any page size', async ({ page, api, lib }) => {
-    test.fail(true, 'sort=duration/-duration has no unique tiebreaker: equal lengths come back in a page-size-dependent order (backend/samples.py:463-464)');
     test.setTimeout(120_000);
     const tag = `tie${uid()}`;
     const job = await lib.job();
@@ -420,7 +419,6 @@ test.describe('known bugs', () => {
 
   test('↑ keeps the selected row clear of the sticky bars', async ({ page, paging, browserName }) => {
     test.skip(browserName !== 'chromium', 'scrollIntoView(nearest) with scroll-margin only verified on Chromium');
-    test.fail(true, 'rows between the 56 px root scroll-padding and the 124-136 px sticky stack count as visible, so ↑ leaves the selection under the toolbar (frontend/src/index.css:64, LibraryScreen.jsx:265)');
     await prefs(page, { 'library:auto': false });
     const ui = await openLibrary(page, `tags=${paging.tag}`);
     test.skip(ui.phone || ui.coarse, 'keyboard browsing (desktop)');
@@ -430,6 +428,8 @@ test.describe('known bugs', () => {
     const header = page.locator('[data-library-list] > [role=row]');
     for (let i = 0; i < 25; i += 1) {
       await page.keyboard.press('ArrowUp');
+      // the row is focused and scrolled in the next frame, not by the time press() returns
+      await expect(selected).toBeFocused();
       const [h, s] = [await header.boundingBox(), await selected.boundingBox()];
       expect(s.y, `after ↑ ×${i + 1} the selected row starts below the sticky header`).toBeGreaterThanOrEqual(h.y + h.height - 1);
     }
@@ -457,14 +457,16 @@ test.describe('known bugs', () => {
   test('a touch-sized select keeps its chevron level with its text', async ({ page, paging }) => {
     const ui = await openLibrary(page, `tags=${paging.tag}`);
     test.skip(!ui.coarse, 'only touch layouts grow selects to 44 px');
-    test.fail(true, 'select.ainput pins its chevron at "top 2px" while coarse:min-h-11 centres the text 22 px down (frontend/src/index.css:300)');
     const f = await filterControls(page, ui);
     const select = f.scope.locator(f.sort);
     const m = await select.evaluate((el) => {
       const cs = getComputedStyle(el);
       const r = el.getBoundingClientRect();
-      const top = parseFloat(cs.backgroundPositionY) || 0;
       const size = parseFloat(cs.backgroundSize.split(' ')[1] || cs.backgroundSize) || 16;
+      // a length, or a percentage of the free height of the background's origin box
+      const [pt, pb] = cs.backgroundOrigin === 'content-box' ? [parseFloat(cs.paddingTop), parseFloat(cs.paddingBottom)] : [0, 0];
+      const y = cs.backgroundPositionY;
+      const top = parseFloat(cs.borderTopWidth) + pt + (y.endsWith('%') ? (parseFloat(y) / 100) * (el.clientHeight - pt - pb - size) : parseFloat(y) || 0);
       return { height: r.height, chevronCentre: top + size / 2 };
     });
     test.skip(m.height < 43.5, 'touch sizing not applied in this engine');

@@ -443,7 +443,6 @@ test.describe('editing', () => {
 
 test.describe('known bugs', () => {
   test('tapping a card on its "Analyzing…" note plays it like the rest of the card', async ({ page, api, lib }) => {
-    test.fail(true, 'the note sits in a pointer-events-auto wrapper (kept for the failed state\'s Re-analyze button), so it swallows taps and long presses meant for the card (frontend/src/components/library/SampleCard.jsx:100)');
     await prefs(page, { 'library:auto': true });
     const tag = `t${uid()}`;
     const [s] = await fresh(api, await lib.job(), tag, [{ name: 'Busy', len: 4 }]);
