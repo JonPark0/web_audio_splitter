@@ -31,8 +31,10 @@ export const test = base.extend({
     app.setSeparationDelay(2);
     app.setSeparationFails(false);
     const errors = [];
+    const consoleLog = [];
     page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
     page.on('console', (m) => {
+      consoleLog.push(`${m.type()}: ${m.text()}`);
       if (m.type() === 'error' && !IGNORED.some((re) => re.test(m.text()))) errors.push(`console: ${m.text()}`);
     });
     await use(page);
@@ -42,6 +44,14 @@ export const test = base.extend({
       } catch {
         // no log yet
       }
+      // The CI log shows a failure's stdout but not its attachments: print
+      // what the page said (console, alerts and status lines).
+      const notes = await page
+        .locator('[role=alert], [role=status]')
+        .allInnerTexts()
+        .catch(() => []);
+      const said = [...consoleLog.slice(-30), ...notes.filter((t) => t.trim()).map((t) => `ui: ${t.trim()}`)];
+      if (said.length) console.log(`page said (${testInfo.project.name}):\n  ${said.join('\n  ')}`);
     }
     expect(errors, 'page errors / console errors').toEqual([]);
   },
