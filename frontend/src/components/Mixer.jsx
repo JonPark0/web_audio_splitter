@@ -267,6 +267,10 @@ export default function Mixer({ taskId, result, bpm, songKey, retrying, onRetryT
 
   const onSelect = useCallback((sel, phase) => {
     setDragging(phase === 'drag');
+    if (phase === 'cancel') {
+      setSelectionState(sel); // as before the drag (none included)
+      return;
+    }
     if (!sel) return;
     const n = normalizeSel(sel);
     if (phase === 'end' && n.end - n.start < 0.0005) return;

@@ -68,7 +68,6 @@ test('the Start field keeps focus when tapped after Set end, and takes a comma d
 
 test('touch cancel during a handle drag puts the selection back', async ({ page, world, browserName }) => {
   cdpOnly(browserName);
-  test.fail(true, 'pointercancel commits the half-dragged edge instead of restoring it - useLaneGestures.js:204-210');
   await openMany(page, world);
   await selectMarker(page);
   const before = await strip(page);

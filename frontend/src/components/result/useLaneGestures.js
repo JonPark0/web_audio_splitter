@@ -21,7 +21,9 @@ const HOLD_MS = 300; // a held finger may then drag in any direction
  *   wheel      horizontal or Shift = pan when zoomed · plain vertical = page
  *              scroll · Ctrl/⌘ zoom is useZoomGestures (whole mixer)
  *
- * Selection updates during a drag are coalesced to one per frame (B8).
+ * Selection updates during a drag are coalesced to one per frame (B8). A
+ * drag the browser cancels (pointercancel: it took the touch over) puts the
+ * selection back as it was: onSelect(before, 'cancel').
  * opts: { timeline, getSelection, onSelect(sel, phase), onSeek(t, track),
  *         onMarker(id), snap(sel, movingEdge, track) }
  */
@@ -96,7 +98,7 @@ export default function useLaneGestures(ref, opts, deps = []) {
       const handle = e.target.closest('[data-handle]');
       const grab = e.target.closest('[data-grab]');
       const marker = e.target.closest('[data-marker]');
-      const base = { lane, id: e.pointerId, x0: e.clientX, y0: e.clientY, at: e.timeStamp, touch: e.pointerType === 'touch' };
+      const base = { lane, id: e.pointerId, x0: e.clientX, y0: e.clientY, at: e.timeStamp, touch: e.pointerType === 'touch', before: sel };
       if (handle && sel) {
         const edge = handle.dataset.handle;
         // off: where in the handle it was grabbed, so the edge doesn't jump
@@ -202,12 +204,22 @@ export default function useLaneGestures(ref, opts, deps = []) {
     }
 
     function onCancel(e) {
-      touches.delete(e.pointerId);
+      const finger = touches.delete(e.pointerId);
       if (!g) return;
-      if (g.mode === 'pinch' && touches.size >= 2) return;
-      const wasDrag = g.mode === 'select' || g.mode === 'edge' || g.mode === 'move';
+      if (g.mode === 'pinch') {
+        if (finger && touches.size < 2) g = null;
+        return;
+      }
+      // Another pointer (a palm on the controls) losing its capture isn't ours.
+      if (e.pointerId !== g.id) return;
+      const done = g;
       g = null;
-      if (wasDrag) commit();
+      if (done.mode === 'select' || done.mode === 'edge' || done.mode === 'move') {
+        cancelAnimationFrame(frame);
+        frame = 0;
+        pending = null;
+        o().onSelect(done.before, 'cancel');
+      }
     }
 
     function onWheel(e) {
