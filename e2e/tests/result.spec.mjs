@@ -577,7 +577,6 @@ test.describe('zoom', () => {
 
   test('touch: a pinch on the ruler zooms the timeline', async ({ page, seed, api, isMobile, browserName }) => {
     test.skip(!isMobile || !hasCDP(browserName), 'multi-touch through CDP');
-    test.fail(true, 'pinch on the ruler does nothing (touch-action pan-y, no pinch handler) - Ruler.jsx:139, Mixer.jsx:521-523');
     const id = await seed.recovered();
     await openJob(page, id);
     const d = await stemDuration(api, id);

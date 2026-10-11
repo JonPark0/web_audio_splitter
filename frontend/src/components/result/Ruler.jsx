@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { useTimelineView, useViewFrame } from '../useWaveZoom';
 import { clamp, fmtTime } from './format';
+import { pinchZoom } from './useLaneGestures';
 
 const TIME_STEPS = [0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600];
 const BEAT_STEPS = [0.25, 0.5, 1, 2, 4, 8, 16, 32, 64, 128, 256];
@@ -69,7 +70,8 @@ function draw(canvas, view, height, bpm, mode, selection) {
 /**
  * Time ruler (bars.beats when the song's BPM is known and Bars is chosen)
  * over the lanes, plus an overview strip that shows and drags the visible
- * window when zoomed. Click/tap the ruler to seek; drag it to pan.
+ * window when zoomed. Click/tap the ruler to seek; drag it to pan; pinch it
+ * to zoom, as on the lanes.
  */
 export default function Ruler({ timeline, bpm, mode, selection, onSeek, height = 20, coarse }) {
   const canvasRef = useRef(null);
@@ -90,22 +92,44 @@ export default function Ruler({ timeline, bpm, mode, selection, onSeek, height =
   }
   useEffect(() => timeline.subscribeHead((t) => placeHead(t)), [timeline]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Click = seek, drag = pan.
+  // Click = seek, drag = pan, two fingers = zoom.
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return undefined;
+    const touches = new Map();
     let g = null;
     const down = (e) => {
       if (e.pointerType === 'mouse' && e.button !== 0) return;
+      if (e.pointerType === 'touch') {
+        touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (touches.size === 2) {
+          const [a, b] = [...touches.values()];
+          g = { zoom: pinchZoom(timeline, el, a, b) };
+          return;
+        }
+        if (touches.size > 2) return;
+      }
       g = { id: e.pointerId, x0: e.clientX, start0: timeline.get().start, moved: false };
       el.setPointerCapture?.(e.pointerId);
     };
     const move = (e) => {
+      if (touches.has(e.pointerId)) touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (g?.zoom) {
+        const [a, b] = [...touches.values()];
+        if (a && b) g.zoom(a, b);
+        return;
+      }
       if (!g || e.pointerId !== g.id) return;
       if (Math.abs(e.clientX - g.x0) > 4) g.moved = true;
       if (g.moved && timeline.get().zoomed) timeline.panTo(g.start0 - (e.clientX - g.x0) / timeline.get().pps);
     };
     const up = (e) => {
+      touches.delete(e.pointerId);
+      if (g?.zoom) {
+        // the finger left on the ruler neither pans nor seeks
+        if (touches.size < 2) g = null;
+        return;
+      }
       if (!g || e.pointerId !== g.id) return;
       if (!g.moved) {
         const r = el.getBoundingClientRect();
@@ -113,7 +137,8 @@ export default function Ruler({ timeline, bpm, mode, selection, onSeek, height =
       }
       g = null;
     };
-    const cancel = () => {
+    const cancel = (e) => {
+      touches.delete(e.pointerId);
       g = null;
     };
     el.addEventListener('pointerdown', down);

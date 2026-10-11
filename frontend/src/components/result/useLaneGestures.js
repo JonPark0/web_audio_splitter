@@ -6,6 +6,20 @@ const TOUCH_SLOP = 8; // a finger wobbles more than a mouse
 const HOLD_MS = 300; // a held finger may then drag in any direction
 
 /**
+ * Two-finger pinch on a time axis (a lane or the ruler: its left edge is the
+ * timeline's x = 0), fingers at a and b ({ x, y } client px). The time under
+ * their midpoint stays under it while their spread scales the zoom. Returns
+ * the update to call with the fingers' new positions.
+ */
+export function pinchZoom(timeline, axis, a, b) {
+  const left = axis.getBoundingClientRect().left;
+  const d0 = Math.max(16, Math.hypot(a.x - b.x, a.y - b.y));
+  const t0 = timeline.timeAt((a.x + b.x) / 2 - left);
+  const pps0 = timeline.get().pps;
+  return (p, q) => timeline.zoomTo((pps0 * Math.hypot(p.x - q.x, p.y - q.y)) / d0, t0, (p.x + q.x) / 2 - left);
+}
+
+/**
  * Pointer gestures for a container of lanes ([data-lane] elements that share
  * the timeline's width):
  *
@@ -72,10 +86,7 @@ export default function useLaneGestures(ref, opts, deps = []) {
       const [a, b] = [...touches.values()];
       const lane = laneOf(document.elementFromPoint((a.x + b.x) / 2, (a.y + b.y) / 2)) || g?.lane || el.querySelector('[data-lane]');
       if (!lane) return;
-      const left = lane.getBoundingClientRect().left;
-      const tl = o().timeline;
-      const cx = (a.x + b.x) / 2 - left;
-      g = { mode: 'pinch', left, d0: Math.max(16, Math.hypot(a.x - b.x, a.y - b.y)), t0: tl.timeAt(cx), pps0: tl.get().pps };
+      g = { mode: 'pinch', zoom: pinchZoom(o().timeline, lane, a, b) };
       pending = null;
     }
 
@@ -129,9 +140,7 @@ export default function useLaneGestures(ref, opts, deps = []) {
       if (touches.has(e.pointerId)) touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (g?.mode === 'pinch') {
         const [a, b] = [...touches.values()];
-        if (!a || !b) return;
-        const d = Math.hypot(a.x - b.x, a.y - b.y);
-        o().timeline.zoomTo((g.pps0 * d) / g.d0, g.t0, (a.x + b.x) / 2 - g.left);
+        if (a && b) g.zoom(a, b);
         return;
       }
       if (!g || e.pointerId !== g.id) return;
