@@ -16,13 +16,15 @@ function formatPan(pan) {
 }
 
 // Per layout, not per viewport width: a landscape phone is 'phone' at 844 px.
-//   phone   44 px: side by side under the name, clear of the meter, in the
-//           96 px column / 64 px lane (snap.js)
+//   phone   44 px: at the two ends of the row under the name (the gap between
+//           them opens the track sheet), in the 96 px column / 64 px lane (snap.js)
 //   tablet  44 px on touch, compact with a mouse
 //   desktop inline with the name
+// Phone and tablet buttons are positioned: they sit over the name button,
+// which fills the row behind them (only they, not their row, cover it).
 const MS_SIZE = {
-  phone: 'h-11 w-11 items-center justify-center',
-  tablet: 'min-h-[24px] min-w-[28px] items-center justify-center',
+  phone: 'relative h-11 w-11 items-center justify-center',
+  tablet: 'relative min-h-[24px] min-w-[28px] items-center justify-center',
   desktop: 'min-w-[16px] coarse:min-h-[44px] coarse:min-w-[32px]',
 };
 
@@ -118,8 +120,9 @@ export function PanSlider({ track, set, className = '' }) {
  *            drag the grip to reorder.
  *            On touch a name renames only once its track is selected.
  *   tablet:  name over M/S (44 px on touch; side by side in a small lane
- *            with a mouse); the name opens the track sheet.
- *   phone:   name over 44 px M/S in 96 px; the name opens the track sheet.
+ *            with a mouse); the name (the row behind M/S) opens the track sheet.
+ *   phone:   name over 44 px M/S in 96 px; the name (the row behind M/S)
+ *            opens the track sheet.
  * A peak meter runs down the right edge.
  */
 export default memo(function TrackHeader({
@@ -185,7 +188,7 @@ export default memo(function TrackHeader({
       pick={meterPick}
       vertical
       label={`${track.name} level`}
-      className="absolute bottom-1 right-0.5 top-1 w-[3px]"
+      className="pointer-events-none absolute bottom-1 right-0.5 top-1 w-[3px]"
     />
   );
 
@@ -197,19 +200,22 @@ export default memo(function TrackHeader({
     // A small lane with a mouse: name and M/S side by side (stacked they need
     // ~46 px; touch lanes are made tall enough to stack 44 px buttons).
     const inline = !phone && height < 56;
+    // Stacked, the name button is the whole row under M/S, so the way into
+    // the track sheet is a finger-sized target even where the lane has no
+    // room for a 44 px row of its own (a phone's 64 px lane).
     return (
       <div onPointerDown={() => onSelect(track.id)} className={`${rowBase} flex ${inline ? 'items-center pr-2' : 'flex-col'}`} style={rowStyle}>
         <button
           type="button"
           onClick={() => onOpen?.(track.id)}
           title="Track settings"
-          className={`weight-hover block min-w-0 truncate border-0 bg-transparent px-1.5 text-left text-caption leading-tight ${
-            inline ? 'flex-1' : 'w-full pt-0.5'
+          className={`weight-hover flex min-w-0 border-0 bg-transparent px-1.5 text-left text-caption leading-tight ${
+            inline ? 'flex-1' : 'absolute inset-0 items-start pt-0.5'
           } ${audible ? 'text-ink' : 'text-muted'}`}
         >
-          {track.name}
+          <span className="truncate">{track.name}</span>
         </button>
-        <MuteSolo track={track} set={set} size={mode} className={inline ? '' : `mt-auto justify-start ${phone ? '' : 'pl-1'}`} />
+        <MuteSolo track={track} set={set} size={mode} className={inline ? '' : `mt-auto ${phone ? 'justify-between' : 'justify-start pl-1'}`} />
         {meter}
       </div>
     );

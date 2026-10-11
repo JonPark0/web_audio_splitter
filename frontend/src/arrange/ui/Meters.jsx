@@ -135,7 +135,7 @@ export function ClipIndicator({ clock, pick, className = '' }) {
       }}
       title={clipped ? 'The mix reached 0 dBFS — click to reset' : 'Clip indicator'}
       aria-label={clipped ? 'Clipped — reset' : 'No clipping'}
-      className={`border-0 bg-transparent p-0 text-caption leading-none ${clipped ? 'weight-up text-ink underline' : 'text-muted'} ${className}`}
+      className={`border-0 bg-transparent p-0 text-caption leading-none coarse:min-h-[44px] ${clipped ? 'weight-up text-ink underline' : 'text-muted'} ${className}`}
     >
       {clipped ? 'Clip' : '0 dB'}
     </button>
