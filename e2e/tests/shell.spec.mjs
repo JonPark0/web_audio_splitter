@@ -22,6 +22,8 @@ test('every section opens from the header and has its own URL and title', async 
     await expect(page).toHaveURL(new RegExp(`#/${name.toLowerCase()}`));
     await expect(page).toHaveTitle(new RegExp(`^${name} — Audio Splitter`));
     await expect(page.getByRole('link', { name, exact: true })).toHaveAttribute('aria-current', 'page');
+    // route focus and screen readers find the section by its heading (Arrange opens on its project instead)
+    if (name !== 'Arrange') await expect(page.getByRole('main').getByRole('heading', { name: new RegExp(`^${name}`) }).first()).toBeAttached();
     await noHorizontalOverflow(page);
   }
 });

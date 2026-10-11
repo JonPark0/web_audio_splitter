@@ -933,6 +933,8 @@ export default function LibraryScreen() {
 
   return (
     <div ref={rootRef} className={`flex w-full flex-col ${bottomBar ? 'pb-16' : ''}`}>
+      {/* The phone bar has no count heading: route focus and screen readers need one. */}
+      {phone && <h2 className="sr-only">Library</h2>}
       {toolbar}
       <input
         ref={fileInputRef}
