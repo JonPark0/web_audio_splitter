@@ -34,6 +34,7 @@ const MAX_FETCHES = 5; // leave one of the browser's 6 connections for the API
 const START_DEADLINE_MS = 2500;
 const RAMP = 0.008;
 const KEEP_LOOP_SEC = 30; // loops up to this long stay fully cached
+const MAX_OUTPUT_LAG = 0.5; // s; no real output (Bluetooth included) is further behind currentTime
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -407,7 +408,10 @@ export default class MixEngine {
     if (ctx.getOutputTimestamp) {
       const ts = ctx.getOutputTimestamp();
       if (ts.contextTime > 0 && ts.performanceTime > 0) {
-        return Math.min(ctx.currentTime, ts.contextTime + (performance.now() - ts.performanceTime) / 1000);
+        const t = ts.contextTime + (performance.now() - ts.performanceTime) / 1000;
+        // WebKit can hand out a timestamp that stops updating (seen without a
+        // real audio device), which froze the playhead while audio ran on.
+        if (t > ctx.currentTime - MAX_OUTPUT_LAG) return Math.min(ctx.currentTime, t);
       }
     }
     return Math.max(0, ctx.currentTime - (ctx.outputLatency || ctx.baseLatency || 0));
