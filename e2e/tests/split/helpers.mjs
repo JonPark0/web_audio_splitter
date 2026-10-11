@@ -162,8 +162,14 @@ export async function dropFiles(page, files) {
     };
     fire('dragenter');
     fire('dragover');
-    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-    const wash = [...document.querySelectorAll('p')].some((p) => /Drop to add audio files/.test(p.textContent));
+    // The overlay renders on the next commit; under load that can take a
+    // few frames, so poll briefly instead of assuming two.
+    const shown = () => [...document.querySelectorAll('p')].some((p) => /Drop to add audio files/.test(p.textContent));
+    let wash = false;
+    for (let i = 0; i < 60 && !wash; i += 1) {
+      await new Promise((r) => requestAnimationFrame(r));
+      wash = shown();
+    }
     const drop = fire('drop');
     return { wash, handled: drop.defaultPrevented };
   }, payload);

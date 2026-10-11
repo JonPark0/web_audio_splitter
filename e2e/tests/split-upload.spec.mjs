@@ -319,7 +319,8 @@ test('files dropped on a job page open the Split home with them listed', async (
   const u = uid();
   const id = await api.completedJob(media('oneshot.wav'));
   await page.goto(`/#/split/job/${id}`);
-  await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+  // the finished job's stems screen, not the placeholder it replaces
+  await expect(page.locator('[data-lane]').first()).toBeVisible();
   const r = await dropFiles(page, [
     { file: media('song120.mp3'), name: `${u}.mp3` },
     { file: media('oneshot.wav'), name: `${u}.txt` },
