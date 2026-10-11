@@ -315,7 +315,6 @@ test('leaving a job page for another section titles the page after that section'
 });
 
 test('deleting the open job from the jobs list leaves its page', async ({ page, api }) => {
-  test.fail(true, 'The job view stops polling once a job has ended and ignores "jobs changed", so it keeps offering Retry/Delete for a deleted job ("Task not found") — frontend/src/components/jobs/JobView.jsx:21-24, JobsPane.jsx:339');
   const [id] = await seedCancelled(api, [`${uid()}.wav`]);
   await page.goto(`/#/split/job/${id}`);
   const alert = main(page).getByRole('alert').filter({ hasText: 'Cancelled — ' });

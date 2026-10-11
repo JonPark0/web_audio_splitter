@@ -9,7 +9,7 @@ import usePoll from '../shell/usePoll';
 import { estimate, useEtaCalibration } from './eta';
 import { RETRYABLE, STATUS_LABELS, TERMINAL, jobName } from './format';
 import JobsPane from './JobsPane';
-import { jobsChanged, publishFromTasks } from './jobsStore';
+import { jobsChanged, onJobsChanged, publishFromTasks } from './jobsStore';
 
 // The result screen pulls in the mixer + streaming engine: its own chunk,
 // prefetched while the job is still running.
@@ -17,6 +17,10 @@ const loadResultScreen = () => import('../ResultScreen');
 const ResultScreen = lazy(loadResultScreen);
 
 const BASE_TITLE = 'Audio Splitter';
+
+const COLUMNS = 'lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:gap-8 2xl:grid-cols-[minmax(0,5fr)_minmax(0,6fr)]';
+const JOB_COLUMN = 'lg:border-r lg:border-line';
+const LIST_COLUMN = 'pb-6 max-lg:mt-2';
 
 function intervalFor(data) {
   if (data === 'gone') return null;
@@ -96,6 +100,12 @@ export default function JobView({ taskId }) {
   useEffect(() => {
     if (status && TERMINAL.has(status)) jobsChanged();
   }, [status]);
+  // An ended job isn't polled any more: look again whenever the jobs change
+  // (a delete from the list beside it), so it doesn't go on offering Retry
+  // and Delete for a job that is gone. Subscribed after the ping above, so
+  // that one doesn't call it back.
+  const finished = !!status && TERMINAL.has(status);
+  useEffect(() => (finished ? onJobsChanged(refresh) : undefined), [finished, refresh]);
 
   // Older servers' /status lacks the name and model: look them up once.
   useEffect(() => {
@@ -146,13 +156,22 @@ export default function JobView({ taskId }) {
   }, []);
 
   if (gone) {
-    return (
+    const notice = (
       <div className="flex flex-col gap-2 py-4">
         <h1 className="m-0 text-h3 font-light">This job no longer exists</h1>
-        <p className="m-0 text-muted">It may have been deleted, or the link is wrong.</p>
+        <p className="m-0 text-muted">{task ? 'It was deleted.' : 'It may have been deleted, or the link is wrong.'}</p>
         <a href={href('/split')} data-label="Go to Jobs" className="link self-start">
           Go to Jobs
         </a>
+      </div>
+    );
+    if (!task) return notice;
+    // Deleted while open (from the jobs list beside it): that list stays,
+    // in the same place, so its focus and bulk report aren't lost.
+    return (
+      <div className={COLUMNS}>
+        <div className={JOB_COLUMN}>{notice}</div>
+        <JobsPane currentId={taskId} className={LIST_COLUMN} />
       </div>
     );
   }
@@ -186,8 +205,8 @@ export default function JobView({ taskId }) {
   // tall iPad), or "Start retry" would sit below the visible edge; its 8 px
   // inner gutter keeps focus rings inside that scroll box.
   return (
-    <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:gap-8 2xl:grid-cols-[minmax(0,5fr)_minmax(0,6fr)]">
-      <div className="lg:border-r lg:border-line">
+    <div className={COLUMNS}>
+      <div className={JOB_COLUMN}>
         <div className="flex flex-col gap-3 py-3 sm:py-4 lg:sticky lg:top-12 lg:-ml-2 lg:max-h-[calc(100dvh-3rem)] lg:overflow-y-auto lg:overscroll-contain lg:pl-2 lg:pr-8">
           <div className="flex flex-col gap-1">
             <BackLink />
@@ -273,7 +292,7 @@ export default function JobView({ taskId }) {
           )}
         </div>
       </div>
-      <JobsPane currentId={taskId} className="pb-6 max-lg:mt-2" />
+      <JobsPane currentId={taskId} className={LIST_COLUMN} />
     </div>
   );
 }
