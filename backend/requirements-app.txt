@@ -11,3 +11,8 @@ alembic>=1.13,<2
 # Pinned: pedalboard 0.9.25's wheel dies with "Illegal instruction" on import
 # on AVX2-only CPUs (no AVX-512); 0.9.16 runs.
 pedalboard==0.9.16
+
+# --- Analysis: librosa's kaiser_fast resampling (analysis.py) ---
+# Arrives today only through librosa 0.9.2 (pinned by audiosr); named here
+# so tempo/key analysis keeps working if that pin goes.
+resampy

@@ -122,11 +122,15 @@ def _detect_bpm(librosa, y: np.ndarray, sr: int, loop_fit: bool):
     if not tempo:
         return None
 
+    # A plain float: the estimate comes out of float32 arrays, and with
+    # NumPy 2 a float32 survives round() and then fails to serialise into the
+    # task's JSON (every job failed right after separation).
+    tempo = float(tempo)
     duration = y.size / sr
     if loop_fit and duration <= LOOP_MAX_SECONDS:
         fitted = _loop_fit_tempo(tempo, duration)
         if fitted:
-            return round(fitted, 2)
+            return round(float(fitted), 2)
 
     lo, hi = TEMPO_RANGE
     while tempo < lo:
