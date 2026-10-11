@@ -436,7 +436,6 @@ test.describe('desktop', () => {
   });
 
   test('Esc in a start/end field restores the previous value', async ({ page, seed, api }) => {
-    test.fail(true, 'Esc commits the typed value: blur() runs onBlur=commit with the stale draft - ExtractPanel.jsx:63,68-70');
     const { d } = await setup(page, seed, api);
     await dragLane(page, 'vocals.wav', 6, 8.4, d);
     const start = page.getByRole('textbox', { name: 'Start (m:ss.mmm)' });
@@ -447,7 +446,6 @@ test.describe('desktop', () => {
   });
 
   test('after Save mix, changing what you hear allows saving that mix', async ({ page, seed, api }) => {
-    test.fail(true, 'the duplicate-save key ignores the stems\' mute/solo/level/variant - ExtractPanel.jsx:185 (keyFor), 308');
     const { d, panel } = await setup(page, seed, api);
     await dragLane(page, 'vocals.wav', 6, 8, d);
     await panel.getByRole('button', { name: 'Save mix' }).click();
@@ -654,7 +652,6 @@ test.describe('touch', () => {
     const id = await seed.recovered();
     const L = await openJob(page, id);
     test.skip(!(L.size === 'phone' && L.short), 'landscape phones');
-    test.fail(true, 'sticky header + viewer take ~200 of ~360 px and the sheet has no scroll-padding: focused fields land under it - Mixer.jsx:548, Sheet.jsx:36');
     const d = await stemDuration(api, id);
     const { scope, laneEl } = await openExtract(page, L);
     await tapLane(page, laneEl, 6, d);
@@ -676,7 +673,6 @@ test.describe('touch', () => {
     await api.cutSample(id, { track: 'bass.wav', start: 10, end: 12, name: 'in the way' });
     const L = await openJob(page, id);
     test.skip(L.size !== 'phone', '56 px phone lanes');
-    test.fail(true, "touch marker targets are 44 px tall on 56 px lanes, so a tap there selects the sample instead of seeking - Lane.jsx:154, TrackRow.jsx:77");
     const d = await stemDuration(api, id);
     await hitLane(page, 'bass.wav', 10.5, d, { touch: true, fy: 0.5 });
     await expect.poll(async () => Math.abs((await timeNow(page)) - 10.5), { timeout: 3000 }).toBeLessThan(0.1);

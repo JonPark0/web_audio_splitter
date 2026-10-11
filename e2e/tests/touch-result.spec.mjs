@@ -45,7 +45,6 @@ async function openExtract(page, L) {
 
 test('the Start field keeps focus when tapped after Set end, and takes a comma decimal', async ({ page, world }) => {
   const L = await openMany(page, world);
-  test.fail(L.size === 'phone', "phone extract sheet: focusing a time field re-renders the mixer, whose new inline onClose re-runs the sheet's focus effect and moves focus to its Close button - result/Sheet.jsx:13-27, Mixer.jsx:732");
   const { scope, laneEl } = await openExtract(page, L);
   const tapLane = async (f) => {
     const b = await centerOf(laneEl);
@@ -69,7 +68,6 @@ test('the Start field keeps focus when tapped after Set end, and takes a comma d
 
 test('touch cancel during a handle drag puts the selection back', async ({ page, world, browserName }) => {
   cdpOnly(browserName);
-  test.fail(true, 'pointercancel commits the half-dragged edge instead of restoring it - useLaneGestures.js:204-210');
   await openMany(page, world);
   await selectMarker(page);
   const before = await strip(page);
@@ -152,7 +150,6 @@ test('phone: a sheet holds the page still - swipes on its veil or panel scroll n
   cdpOnly(browserName);
   const L = await openMany(page, world);
   test.skip(L.size !== 'phone', 'phone sheets');
-  test.fail(true, 'the result sheets lock nothing (no scroll lock, veil without touch-action: none), unlike the Library ones - result/Sheet.jsx:29-31');
   await page.evaluate(() => window.scrollTo(0, 0));
   expect(await page.evaluate(() => document.documentElement.scrollHeight - innerHeight), 'page taller than the screen').toBeGreaterThan(20);
   await page.getByRole('button', { name: 'bass: extract, download, spectrogram, level' }).click();

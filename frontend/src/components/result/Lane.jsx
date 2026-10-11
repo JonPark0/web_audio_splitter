@@ -10,7 +10,8 @@ const INK = '#141414';
  * (redrawn per frame on zoom/pan, never per playhead tick), a paper mask that
  * greys the unplayed part, the playhead, the selection and markers for
  * samples already cut from this job. Gestures are handled by the container
- * (useLaneGestures) through the data-* attributes.
+ * (useLaneGestures) through the data-* attributes. `height` is the
+ * waveform's; a short touch lane with markers adds a strip for them.
  */
 export default memo(function Lane({
   track,
@@ -74,6 +75,11 @@ export default memo(function Lane({
     const x1 = xAt(selection.end);
     if (x1 >= -1 && x0 <= view.width + 1) selBox = { x0, x1, left: Math.max(-1, x0), right: Math.min(view.width + 1, x1) };
   }
+  // A touch marker is a 44 px target. On a lane shorter than two of those
+  // (56 px phone rows, the landscape sheet) it covered most of the waveform,
+  // so a tap there selected the sample instead of seeking: such lanes get a
+  // 44 px strip for their markers under the waveform instead.
+  const band = coarse && markers?.length && height < 88 ? 44 : 0;
   const handleW = coarse ? 44 : 12;
   const grabH = coarse ? Math.min(44, height - 12) : 14;
   // A selection narrower than a handle: the handles meet in the middle
@@ -85,13 +91,13 @@ export default memo(function Lane({
       data-lane={track}
       aria-label={label}
       className="rs-lane relative overflow-hidden"
-      style={{ height }}
+      style={{ height: height + band }}
     >
       <canvas
         ref={canvasRef}
         aria-hidden="true"
-        className="absolute inset-0 h-full w-full"
-        style={{ opacity: dim ? 0.3 : 1 }}
+        className="absolute inset-x-0 top-0 w-full"
+        style={{ height, opacity: dim ? 0.3 : 1 }}
       />
       <div ref={maskRef} aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-0 w-full bg-paper/50" />
 
@@ -143,15 +149,16 @@ export default memo(function Lane({
         if (coarse) {
           // Touch has no hover title: the name is written at the marker's
           // start, and only that word (44 px tall, under the selection's
-          // strip and handles) is a target, so the rest of the lane keeps
-          // its taps. Tap = select the sample, like a click.
+          // strip and handles; in the strip when there is one) is a target,
+          // so the rest of the lane keeps its taps. Tap = select the sample,
+          // like a click.
           return (
             <React.Fragment key={m.id}>
               <span aria-hidden="true" className={`pointer-events-none absolute bottom-0 h-[3px] ${tone}`} style={{ left, width }} />
               <div
                 data-marker={m.id}
                 className="absolute bottom-0 flex items-end pb-1"
-                style={{ left, height: Math.min(44, height), minWidth: 44, maxWidth: Math.max(44, Math.min(160, view.width - left)) }}
+                style={{ left, height: Math.min(44, height + band), minWidth: 44, maxWidth: Math.max(44, Math.min(160, view.width - left)) }}
               >
                 <span className="pointer-events-none truncate bg-paper/80 px-1 text-[11px] leading-4 text-muted">{m.name}</span>
               </div>

@@ -13,11 +13,18 @@ export const MIN_SAMPLE_SEC = 0.05; // the backend's MIN_SAMPLE_SECONDS
 
 /** m:ss.mmm field: typed and committed on Enter/blur; ± steppers on touch. */
 function TimeField({ label, value, onCommit, active, onFocus, disabled, step, steppers }) {
-  const [draft, setDraft] = useState(null);
+  const [draft, setDraftState] = useState(null);
+  // The blur right after Enter/Escape runs commit before a re-render: it
+  // reads the draft from here, so Escape's discarded text isn't committed.
+  const draftRef = useRef(null);
+  const setDraft = (v) => {
+    draftRef.current = v;
+    setDraftState(v);
+  };
   const clickFocus = useRef(false);
   const commit = () => {
-    if (draft == null) return;
-    const t = parseTime(draft);
+    if (draftRef.current == null) return;
+    const t = parseTime(draftRef.current);
     setDraft(null);
     if (t != null) onCommit(t);
   };
@@ -120,6 +127,7 @@ export default function ExtractPanel({
   layout = 'docked',
   onHeight,
   viewer,
+  viewerTools = null,
   coarse = false,
 }) {
   const sheet = layout === 'sheet';
@@ -139,7 +147,15 @@ export default function ExtractPanel({
   const [step, setStep] = useState('0.01');
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState(null);
-  const [savedKey, setSavedKey] = useState(null);
+  const [savedKey, setSavedKeyState] = useState(null);
+  // The guard reads the saved key from a ref: between a save finishing and
+  // the re-render, an Enter still runs the previous render's save, which saw
+  // no saved key and saved the same sample twice (WebKit).
+  const savedKeyRef = useRef(null);
+  const setSavedKey = (k) => {
+    savedKeyRef.current = k;
+    setSavedKeyState(k);
+  };
   const savingRef = useRef(false);
 
   const start = selection?.start ?? 0;
@@ -182,11 +198,15 @@ export default function ExtractPanel({
     sampleRate: rate ? Number(rate) : undefined,
     mono: mono || undefined,
   });
+  // What a mix save sends for the stems: what you hear right now.
+  const mixStems = () => tracks.map((t) => ({ track: t, variant: variantOf(t), gain: Math.round(gainOf(t) * 10000) / 10000 }));
+  // A mix is only a duplicate while every stem's level, mute/solo and variant
+  // are what was saved.
   const keyFor = (asMix) =>
-    JSON.stringify({ asMix, source, s: start.toFixed(4), e: end.toFixed(4), name, o: options(), v: asMix ? null : variantOf(source) });
+    JSON.stringify({ asMix, source, s: start.toFixed(4), e: end.toFixed(4), name, o: options(), v: asMix ? mixStems() : variantOf(source) });
 
   const save = async (asMix) => {
-    if (!selection || tooShort || savingRef.current || keyFor(asMix) === savedKey) return;
+    if (!selection || tooShort || savingRef.current || keyFor(asMix) === savedKeyRef.current) return;
     savingRef.current = true; // B6: a second Enter while saving is ignored
     setSaving(true);
     setStatus(null);
@@ -196,7 +216,7 @@ export default function ExtractPanel({
       const res = asMix
         ? await createMixSample({
             taskId,
-            stems: tracks.map((t) => ({ track: t, variant: variantOf(t), gain: Math.round(gainOf(t) * 10000) / 10000 })),
+            stems: mixStems(),
             startSec: start,
             endSec: end,
             name: sampleName,
@@ -449,8 +469,7 @@ export default function ExtractPanel({
 
   if (sheet) {
     return (
-      <Sheet title={`Extract · ${label}`} onClose={onClose} full>
-        {viewer}
+      <Sheet title={`Extract · ${label}`} onClose={onClose} full pinned={viewer} headerExtra={viewerTools}>
         <div className="flex flex-col gap-2 pb-6 pt-1 text-caption">
           <div className="flex items-center gap-4">
             <button
