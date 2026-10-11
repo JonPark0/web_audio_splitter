@@ -305,12 +305,12 @@ test('opening a finished job moves focus to its heading', async ({ page, api }) 
 });
 
 test('leaving a job page for another section titles the page after that section', async ({ page, api }) => {
-  test.fail(true, 'JobView\'s unmount cleanup resets the title to "Split — Audio Splitter" after App set "Library — …" (the lazy screen unmounts the job view later) — frontend/src/components/jobs/JobView.jsx:140-142 vs App.jsx:52');
   const [id] = await seedCancelled(api, [`${uid()}.wav`]);
   await page.goto(`/#/split/job/${id}`);
   await expect(main(page).getByRole('alert')).toContainText('Cancelled — ');
   await nav(page).getByRole('link', { name: 'Library', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Library' }).first()).toBeVisible();
+  // the Library has loaded (its phone layout has no "Library" heading)
+  await expect(page.getByRole('searchbox', { name: 'Search samples' })).toBeVisible();
   await expect(page).toHaveTitle('Library — Audio Splitter', { timeout: 2000 });
 });
 

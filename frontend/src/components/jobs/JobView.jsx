@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useEffect, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { deleteTask, errorDetail, getStatus, getTasks, isTaskGone } from '../../api';
 import { href, navigate } from '../../router';
 import ProcessingScreen from '../ProcessingScreen';
@@ -118,9 +118,10 @@ export default function JobView({ taskId }) {
   const name = merged ? jobName(merged) : 'Job';
 
   // Tab title: "42% · full_song — Audio Splitter" while it runs.
+  const titleRef = useRef('');
   useEffect(() => {
     if (gone) {
-      document.title = `Job not found — ${BASE_TITLE}`;
+      document.title = titleRef.current = `Job not found — ${BASE_TITLE}`;
       return;
     }
     if (!merged) return;
@@ -135,10 +136,13 @@ export default function JobView({ taskId }) {
       prefix = est?.fraction != null ? `${Math.round(est.fraction * 100)}% · ` : `${STATUS_LABELS[merged.status]} · `;
     } else if (merged.status === 'failed' || merged.status === 'download_failed') prefix = 'Failed · ';
     else if (merged.status === 'cancelled') prefix = 'Cancelled · ';
-    document.title = `${prefix}${short} — ${BASE_TITLE}`;
+    document.title = titleRef.current = `${prefix}${short} — ${BASE_TITLE}`;
   });
+  // Only while the title is still this job's: leaving for another section,
+  // App may already have retitled the page (a lazy screen unmounts this
+  // view after that).
   useEffect(() => () => {
-    document.title = `Split — ${BASE_TITLE}`;
+    if (document.title === titleRef.current) document.title = `Split — ${BASE_TITLE}`;
   }, []);
 
   if (gone) {
