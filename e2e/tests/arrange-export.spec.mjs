@@ -71,7 +71,6 @@ test('exporting a project without clips says there is nothing to export', async 
 });
 
 test('with no loop region set, the Loop range is disabled and says why', async ({ page, api, smp }) => {
-  test.fail(true, 'F3: every project stores a 0–16 loop (backend/projects.py:58-67), and hasLoop ignores loop.enabled (frontend/src/arrange/ui/Toolbar.jsx:237), so Loop is never disabled and exports bars 1–4 (silence for an empty project)');
   const p = await seedProject(api, 'Export no loop', [track('T1', [clip(smp.drum, 0)])]);
   const ui = await openProject(page, p);
   await press(page, ui, page.getByRole('button', { name: 'Export', exact: true }).locator('visible=true').first());

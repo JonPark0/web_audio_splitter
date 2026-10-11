@@ -235,7 +235,9 @@ export function ExportControl({ project, exporting, progress, disabled, onExport
   const [normalize, setNormalize] = useState(false);
   const ref = useRef(null);
   useDismiss(open, ref, () => setOpen(false));
-  const hasLoop = project?.loop?.end_beat > project?.loop?.start_beat;
+  // Every project stores a region (0-16 until one is set); only a loop that
+  // is on is the user's, and what playback repeats.
+  const hasLoop = !!project?.loop?.enabled && project.loop.end_beat > project.loop.start_beat;
   const effective = hasLoop ? scope : 'song';
   const word = (on, label, onClick, title, disabled) => (
     <TextButton current={on} aria-pressed={on} onClick={onClick} title={title} disabled={disabled} className={tap}>
