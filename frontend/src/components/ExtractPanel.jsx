@@ -189,8 +189,12 @@ export default function ExtractPanel({
     sampleRate: rate ? Number(rate) : undefined,
     mono: mono || undefined,
   });
+  // What a mix save sends for the stems: what you hear right now.
+  const mixStems = () => tracks.map((t) => ({ track: t, variant: variantOf(t), gain: Math.round(gainOf(t) * 10000) / 10000 }));
+  // A mix is only a duplicate while every stem's level, mute/solo and variant
+  // are what was saved.
   const keyFor = (asMix) =>
-    JSON.stringify({ asMix, source, s: start.toFixed(4), e: end.toFixed(4), name, o: options(), v: asMix ? null : variantOf(source) });
+    JSON.stringify({ asMix, source, s: start.toFixed(4), e: end.toFixed(4), name, o: options(), v: asMix ? mixStems() : variantOf(source) });
 
   const save = async (asMix) => {
     if (!selection || tooShort || savingRef.current || keyFor(asMix) === savedKey) return;
@@ -203,7 +207,7 @@ export default function ExtractPanel({
       const res = asMix
         ? await createMixSample({
             taskId,
-            stems: tracks.map((t) => ({ track: t, variant: variantOf(t), gain: Math.round(gainOf(t) * 10000) / 10000 })),
+            stems: mixStems(),
             startSec: start,
             endSec: end,
             name: sampleName,

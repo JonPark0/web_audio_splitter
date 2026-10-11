@@ -446,7 +446,6 @@ test.describe('desktop', () => {
   });
 
   test('after Save mix, changing what you hear allows saving that mix', async ({ page, seed, api }) => {
-    test.fail(true, 'the duplicate-save key ignores the stems\' mute/solo/level/variant - ExtractPanel.jsx:185 (keyFor), 308');
     const { d, panel } = await setup(page, seed, api);
     await dragLane(page, 'vocals.wav', 6, 8, d);
     await panel.getByRole('button', { name: 'Save mix' }).click();
