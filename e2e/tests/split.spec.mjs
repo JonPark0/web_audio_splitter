@@ -290,7 +290,6 @@ test.describe('layout', () => {
 // ---- known bugs: these assert the right behaviour and are expected to fail until fixed ----
 
 test('opening a finished job moves focus to its heading', async ({ page, api }) => {
-  test.fail(true, 'Focus goes to the placeholder <h1>Job</h1>, which unmounts when the stems screen replaces it, leaving focus on <body> — frontend/src/components/jobs/JobView.jsx:156,191 with shell/useRouteFocus.js:171');
   const name = `${uid()}.wav`;
   const id = await seedJob(api, media('oneshot.wav'), { name });
   await api.waitJob(id);
