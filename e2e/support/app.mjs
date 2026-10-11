@@ -11,7 +11,7 @@
  *                (default postgresql://postgres:postgres@127.0.0.1:5432)
  */
 import { spawn, execFileSync } from 'node:child_process';
-import { createReadStream, existsSync, mkdirSync, rmSync, statSync, writeFileSync, openSync } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, openSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
 import path from 'node:path';
@@ -88,6 +88,32 @@ function startFrontend(port, backendPort) {
 }
 
 /**
+ * Removes worker folders (and databases) left by runs whose process is
+ * gone - a crashed or interrupted run never reaches stop(). Folders of live
+ * processes (another run in progress) are kept.
+ */
+export function removeStaleWorkers() {
+  const dir = path.join(CACHE, 'workers');
+  if (!existsSync(dir)) return;
+  for (const name of readdirSync(dir)) {
+    const pid = Number(/^e2e_(\d+)_\d+$/.exec(name)?.[1]);
+    if (!pid) continue;
+    try {
+      process.kill(pid, 0);
+      continue; // still running
+    } catch {
+      // gone
+    }
+    rmSync(path.join(dir, name), { recursive: true, force: true });
+    try {
+      psql(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+    } catch {
+      // database server not reachable yet; the folder was the big part
+    }
+  }
+}
+
+/**
  * Starts the stack for one worker and returns
  * { url, api, mediaDir, setSeparationDelay(sec), setSeparationFails(bool), stop() }.
  */
@@ -148,6 +174,10 @@ export async function startApp(workerIndex) {
       } catch {
         // left for the next run's DROP ... IF EXISTS
       }
+      // Stems, samples and renders add up to gigabytes over a full run (a
+      // failed test already has backend.log attached). E2E_KEEP_WORKERS=1
+      // keeps them for a look afterwards.
+      if (!process.env.E2E_KEEP_WORKERS) rmSync(mediaDir, { recursive: true, force: true });
     },
   };
 }

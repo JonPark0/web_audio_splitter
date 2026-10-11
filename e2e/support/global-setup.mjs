@@ -6,7 +6,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { CACHE, REPO } from './app.mjs';
+import { CACHE, REPO, removeStaleWorkers } from './app.mjs';
 import { MEDIA, MEDIA_DIR } from './media.mjs';
 
 const run = (cmd, args, opts = {}) => execFileSync(cmd, args, { stdio: 'inherit', ...opts });
@@ -26,6 +26,7 @@ export default async function globalSetup() {
 
   mkdirSync(MEDIA_DIR, { recursive: true });
   mkdirSync(CACHE, { recursive: true });
+  removeStaleWorkers();
   for (const [file, ffmpegArgs] of Object.entries(MEDIA)) {
     const out = path.join(MEDIA_DIR, file);
     if (!existsSync(out)) run('ffmpeg', ['-nostdin', '-y', '-loglevel', 'error', ...ffmpegArgs, out]);
