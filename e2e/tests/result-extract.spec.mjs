@@ -673,7 +673,6 @@ test.describe('touch', () => {
     await api.cutSample(id, { track: 'bass.wav', start: 10, end: 12, name: 'in the way' });
     const L = await openJob(page, id);
     test.skip(L.size !== 'phone', '56 px phone lanes');
-    test.fail(true, "touch marker targets are 44 px tall on 56 px lanes, so a tap there selects the sample instead of seeking - Lane.jsx:154, TrackRow.jsx:77");
     const d = await stemDuration(api, id);
     await hitLane(page, 'bass.wav', 10.5, d, { touch: true, fy: 0.5 });
     await expect.poll(async () => Math.abs((await timeNow(page)) - 10.5), { timeout: 3000 }).toBeLessThan(0.1);
