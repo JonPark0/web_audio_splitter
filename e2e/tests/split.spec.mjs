@@ -159,6 +159,18 @@ test.describe('job page', () => {
     await expect(page).toHaveURL(/#\/split$/);
   });
 
+  test('a failed restoration says why in a line, not a traceback', async ({ page, api }) => {
+    // the recovery models aren't installed here: the restore subprocess fails
+    const id = await seedJob(api, media('oneshot.wav'), { name: `${uid()}.wav`, recover: true });
+    const { status, error } = await api.waitJob(id);
+    expect(status).toBe('failed');
+    expect(error).toMatch(/^Recovery failed/);
+    expect(error).not.toContain('Traceback');
+    expect(error.length).toBeLessThan(400);
+    await page.goto(`/#/split/job/${id}`);
+    await expect(main(page).getByRole('alert')).toHaveText(`Failed — ${error}`);
+  });
+
   test('"← Jobs" goes back to the list', async ({ page, api }) => {
     const [id] = await seedCancelled(api, [`${uid()}.wav`]);
     await page.goto(`/#/split/job/${id}`);
