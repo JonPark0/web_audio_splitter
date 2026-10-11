@@ -64,6 +64,23 @@ test('drag a sample from the browser onto a lane; below the last track makes a n
   await pollProject(api, p.id, (d) => d.tracks.map((t) => t.clips.map((c) => c.start_beat))).toEqual([[4], [], [], [2]]);
 });
 
+test('opened over plain http (a LAN address: no crypto.randomUUID), dropped samples still land', async ({ page, api, smp }) => {
+  // Browsers expose randomUUID only in secure contexts; the test server's 127.0.0.1 counts as one.
+  await page.addInitScript(() => Object.defineProperty(Crypto.prototype, 'randomUUID', { value: undefined, configurable: true }));
+  const p = await seedProject(api, 'Plain http', [track('T1')]);
+  await openProject(page, p);
+  expect(await page.evaluate(() => typeof crypto.randomUUID)).toBe('undefined');
+  await filterBrowser(page, smp);
+  const ppb = await pxPerBeat(page);
+  const lh = await laneHeight(page);
+  await sampleRow(page, smp.drum.name).dragTo(lanes(page), { targetPosition: { x: 4.3 * ppb, y: lh / 2 } });
+  await sampleRow(page, smp.shot.name).dragTo(lanes(page), { targetPosition: { x: 2 * ppb + 3, y: lh + 20 } }); // and a new track
+  await pollProject(api, p.id, (d) => d.tracks.map((t) => t.clips.map((c) => c.start_beat))).toEqual([[4], [2]]);
+  const d = await getProject(api, p.id);
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+  for (const id of [d.tracks[1].id, ...allClips(d).map((c) => c.id)]) expect(id).toMatch(uuid);
+});
+
 test('move a clip with snapping (1 beat, off, 1 bar) and onto the track below', async ({ page, api, smp }) => {
   const c = clip(smp.drum, 4);
   const p = await seedProject(api, 'Move', [track('T1', [c]), track('T2')]);
