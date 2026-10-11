@@ -26,6 +26,18 @@ test('every section opens from the header and has its own URL and title', async 
   }
 });
 
+test('the tab has an icon, and /favicon.ico exists for browsers that ask for it anyway', async ({ page }) => {
+  await page.goto('/');
+  const icons = await page.locator('link[rel=icon]').evaluateAll((links) => links.map((l) => l.href));
+  expect(icons.length).toBeGreaterThan(0);
+  for (const url of [...icons, '/favicon.ico']) {
+    const res = await page.request.get(url);
+    expect(res.ok(), url).toBe(true);
+    // not the test server's index.html fallback for unknown paths
+    expect((await res.text()).slice(0, 20).toLowerCase(), url).not.toContain('<!doctype');
+  }
+});
+
 test('a deep link and a reload land on the same screen; Back returns', async ({ page }) => {
   await page.goto('/#/library?q=kick');
   await expect(page).toHaveTitle(/^Library/);
