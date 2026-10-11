@@ -316,7 +316,6 @@ test('shift-click extends the selection from the last box clicked, every time', 
   await seedCancelled(api, Array.from({ length: 16 }, (_, i) => `${u}-${String(i).padStart(2, '0')}.wav`));
   await page.goto(`/#/split?q=${u}`);
   test.skip(await isNarrow(page), 'checkboxes only on single-line lists');
-  test.fail(true, 'Only the first shift-click selects a range: toggleCheck reads lastCheckedRef inside the deferred setChecked updater after it was set to the clicked id — frontend/src/components/jobs/JobsPane.jsx:215-232');
   const boxes = jobsRegion(page).locator('li[data-job-row]').getByRole('checkbox');
   await expect(boxes).toHaveCount(16);
   const checked = () => boxes.evaluateAll((bs) => bs.map((b, i) => (b.checked ? i : -1)).filter((i) => i >= 0));
@@ -335,7 +334,6 @@ test('Escape clears the selection while a row checkbox has focus', async ({ page
   const [id] = await seedCancelled(api, [`${u}.wav`]);
   await page.goto(`/#/split?q=${u}`);
   if (await isNarrow(page)) await jobsRegion(page).getByRole('button', { name: 'Select jobs' }).click();
-  test.fail(true, 'The Escape handler ignores keys from any <input>, including the row checkboxes themselves — frontend/src/components/jobs/JobsPane.jsx:308');
   const box = jobRow(page, id).getByRole('checkbox');
   await box.focus();
   await page.keyboard.press('Space');
