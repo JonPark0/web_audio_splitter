@@ -343,7 +343,6 @@ test('Escape clears the selection while a row checkbox has focus', async ({ page
 });
 
 test('Back from a job keeps the rows Load more added to a searched list', async ({ page, api }) => {
-  test.fail(true, 'The one-entry list cache is overwritten by the job page\'s own (unfiltered) jobs list, so Back to a searched/filtered list shows only the first 30 rows — frontend/src/components/jobs/jobsStore.js:66-74, JobsPane.jsx:138 (JobView.jsx:272)');
   const u = uid();
   await seedCancelled(api, Array.from({ length: 33 }, (_, i) => `${u}-${String(i + 1).padStart(2, '0')}.wav`));
   await page.goto(`/#/split?q=${u}`);
