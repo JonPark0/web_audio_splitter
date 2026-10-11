@@ -215,7 +215,10 @@ test.describe('stem controls', () => {
       await page.mouse.move(to, y, { steps: 8 });
       await page.mouse.up();
     };
-    await drag(xFor(-20), xFor(0.45));
+    // One px is ~0.3 dB and the calibration is only good to about that, so aim
+    // at +0.25 (raw +0.5 or 0, both inside the ±0.75 window); press on the
+    // track well away from the thumb, so no engine treats it as a thumb grab.
+    await drag(xFor(-40), xFor(0.25));
     await expect(value, 'snaps to the 0 dB detent').toHaveText('0.0');
     await drag(xFor(0), xFor(3));
     expect(Math.abs(Number(await fader.inputValue()) - 3)).toBeLessThanOrEqual(1);

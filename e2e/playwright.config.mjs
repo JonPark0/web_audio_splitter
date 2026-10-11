@@ -42,11 +42,14 @@ export default defineConfig({
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
   },
-  // Playback starts from real clicks anyway; on Chromium the flag keeps a
-  // headless run from depending on how it counts a synthetic gesture.
-  projects: projects.map((p) =>
-    p.use.defaultBrowserType === 'chromium'
-      ? { ...p, use: { ...p.use, launchOptions: { args: ['--autoplay-policy=no-user-gesture-required'] } } }
-      : p
-  ),
+  // Playback starts from real clicks anyway; the flag (Chromium) and prefs
+  // (Firefox) keep a headless run from depending on how the engine counts a
+  // synthetic gesture.
+  projects: projects.map((p) => {
+    if (p.use.defaultBrowserType === 'chromium') return { ...p, use: { ...p.use, launchOptions: { args: ['--autoplay-policy=no-user-gesture-required'] } } };
+    if (p.use.defaultBrowserType === 'firefox') {
+      return { ...p, use: { ...p.use, launchOptions: { firefoxUserPrefs: { 'media.autoplay.default': 0, 'media.autoplay.block-webaudio': false } } } };
+    }
+    return p;
+  }),
 });

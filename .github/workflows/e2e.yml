@@ -69,8 +69,17 @@ jobs:
           cache: pip
           cache-dependency-path: e2e/requirements.txt
 
-      - name: System packages (ffmpeg, libsndfile)
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg libsndfile1
+      - name: System packages (ffmpeg, libsndfile, PulseAudio)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg libsndfile1 pulseaudio
+
+      # A runner has no sound card: Firefox's AudioContext then never starts
+      # and media elements don't play. A null sink gives every engine a real
+      # output device (Chromium falls back to a fake one on its own).
+      - name: Virtual audio output
+        run: |
+          pulseaudio --start --exit-idle-time=-1
+          pactl load-module module-null-sink sink_name=e2e
+          pactl set-default-sink e2e
 
       - name: Backend dependencies (without the ML stack)
         run: pip install -r e2e/requirements.txt

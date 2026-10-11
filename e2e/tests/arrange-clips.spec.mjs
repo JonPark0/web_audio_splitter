@@ -134,7 +134,12 @@ test('fades by handle and in ms, reverse, and the clip gain fader with its reset
   await expect(clipEl(page, c.id)).toContainText('rev');
 
   const gain = dock(page).getByRole('slider', { name: 'Clip gain' });
+  // Arrows belong to a slider with keyboard focus (after a click they nudge
+  // the clip). Firefox counts a script focus as keyboard focus only after a
+  // keyboard focus move, so Tab once first.
+  await page.keyboard.press('Tab');
   await gain.focus();
+  await expect(gain).toBeFocused();
   for (let i = 0; i < 6; i += 1) await page.keyboard.press('ArrowLeft');
   await pollProject(api, p.id, (d) => allClips(d)[0].gain).toBeCloseTo(10 ** (-3 / 20), 3);
   await expect(dock(page).getByRole('button', { name: 'Reset clip gain to 0 dB' })).toHaveText('−3.0 dB');
