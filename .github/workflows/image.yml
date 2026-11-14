@@ -1,0 +1,145 @@
+# Builds the backend (GPU) and frontend Docker images and publishes them to
+# GHCR, so the server only pulls them (docker compose -f docker-compose.gpu.yml
+# pull) instead of building on the spot. main gets the tags `main` and
+# `sha-<commit>`; IMAGE_TAG=sha-<commit> on the server runs an earlier build.
+# Pull requests build the images without publishing them, and only the images
+# whose directory changed: the backend (CUDA PyTorch plus the Apollo, FlashSR
+# and BS-Roformer checkpoints) takes a long time and much of the runner's disk.
+#
+# Both images always come from the same commit; run them with the same
+# IMAGE_TAG. The CPU setup (docker-compose.cpu.yml) still builds locally.
+name: image
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: image-${{ github.ref }}
+  # a main build is never cancelled, so every merged commit keeps its sha- tag
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # Picks the images to build: all of them on main and manual runs; on a pull
+  # request only those whose directory (or this workflow) changed.
+  changes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.pick.outputs.matrix }}
+    env:
+      IMAGES: >-
+        [
+          {"name": "backend", "path": "backend/", "image": "ghcr.io/jonpark0/web_audio_splitter-backend", "target": "", "cache": "registry"},
+          {"name": "frontend", "path": "frontend/", "image": "ghcr.io/jonpark0/web_audio_splitter-frontend", "target": "prod", "cache": "gha"}
+        ]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # a pull request checks out its merge commit; its first parent is the
+          # base branch, so HEAD^1..HEAD is exactly what the pull request changes
+          fetch-depth: 2
+      - id: pick
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            changed=$(git diff --name-only HEAD^1 HEAD)
+            printf '%s\n' "$changed"
+            if printf '%s\n' "$changed" | grep -qx '.github/workflows/image.yml'; then
+              matrix=$(jq -c . <<< "$IMAGES")
+            else
+              matrix=$(jq -c --arg changed "$changed" \
+                '[.[] | .path as $p | select($changed | split("\n") | any(startswith($p)))]' <<< "$IMAGES")
+            fi
+          else
+            matrix=$(jq -c . <<< "$IMAGES")
+          fi
+          echo "matrix=$matrix" | tee -a "$GITHUB_OUTPUT"
+
+  image:
+    name: image (${{ matrix.name }})
+    needs: changes
+    if: needs.changes.outputs.matrix != '[]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.changes.outputs.matrix) }}
+    steps:
+      # The runner has ~20 GB free; the backend's CUDA libraries and model
+      # checkpoints need room both extracted and compressed. Remove
+      # preinstalled toolchains this build never uses.
+      - name: Free disk space
+        if: matrix.name == 'backend'
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache /usr/local/share/boost /usr/share/swift \
+            /usr/local/share/powershell /usr/local/share/chromium /usr/local/lib/node_modules
+          docker image prune --all --force > /dev/null
+          df -h /
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      # Also on pull requests: they read the backend's registry cache.
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ matrix.image }}
+          tags: |
+            type=raw,value=main,enable={{is_default_branch}}
+            type=sha,prefix=sha-
+      # The backend's layers outgrow the 10 GB Actions cache, so its cache lives
+      # in GHCR next to the image (same package: layers are shared, not copied).
+      # Pull requests only read it.
+      - id: cache
+        env:
+          CACHE: ${{ matrix.cache }}
+          IMAGE: ${{ matrix.image }}
+          NAME: ${{ matrix.name }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$CACHE" = registry ]; then
+            echo "from=type=registry,ref=$IMAGE:buildcache" >> "$GITHUB_OUTPUT"
+            if [ "$EVENT" != pull_request ]; then
+              echo "to=type=registry,ref=$IMAGE:buildcache,mode=max,image-manifest=true,oci-mediatypes=true" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "from=type=gha,scope=$NAME" >> "$GITHUB_OUTPUT"
+            echo "to=type=gha,mode=max,scope=$NAME" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ./${{ matrix.path }}
+          target: ${{ matrix.target }}
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # only the backend Dockerfile declares these ARGs; the frontend ignores
+          # them. GPU PyTorch, and FlashSR's checkpoints baked in like the others.
+          build-args: |
+            USE_GPU=true
+            PREFETCH_FLASHSR=true
+          cache-from: ${{ steps.cache.outputs.from }}
+          cache-to: ${{ steps.cache.outputs.to }}
+      - if: matrix.name == 'backend' && always()
+        run: df -h /

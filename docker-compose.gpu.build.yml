@@ -1,0 +1,25 @@
+# Builds the GPU stack from this checkout instead of pulling the published
+# images (development, or a change not yet merged):
+#   docker compose -f docker-compose.gpu.yml -f docker-compose.gpu.build.yml up -d --build
+# FRONTEND_MODE=dev runs the Vite dev server with frontend/ mounted; the
+# default (prod) is the same nginx build as the published image.
+services:
+  backend:
+    build:
+      context: ./backend
+      args:
+        USE_GPU: "true"
+        PREFETCH_FLASHSR: ${PREFETCH_FLASHSR:-true}
+    # Local tag, so a source build never takes the name of a pulled image
+    image: web_audio_splitter-backend:local
+
+  frontend:
+    build:
+      context: ./frontend
+      target: ${FRONTEND_MODE:-prod}
+    image: web_audio_splitter-frontend:local
+    volumes:  # used by the dev server only; the prod (nginx) image ignores /app
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - CHOKIDAR_USEPOLLING=true

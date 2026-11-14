@@ -1,0 +1,51 @@
+name: GHCR cleanup
+
+# Keeps the container registry small. Every main build pushes new images (the
+# backend alone is several GB) and the previous `main` becomes untagged. This
+# workflow keeps:
+#   - `main` and the backend's `buildcache`
+#   - the 5 newest other `sha-<commit>` images (for rollbacks with IMAGE_TAG)
+# and deletes older sha-* images and untagged leftovers (old `main` builds and
+# replaced build caches), without breaking images (the action follows an index
+# to its platform/attestation manifests).
+#
+# The repository needs the Admin role on each package to delete versions:
+# Package settings → Manage Actions access → web_audio_splitter → Role: Admin.
+on:
+  schedule:
+    - cron: '23 19 * * 0' # Mondays 04:23 Asia/Seoul
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Only report what would be deleted
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: ghcr-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f # v1.2.2
+        with:
+          packages: web_audio_splitter-backend,web_audio_splitter-frontend
+          # keep-n-tagged applies only to images matching delete-tags (sha-*).
+          # An excluded tag takes its whole image out of the run (never untagged
+          # or deleted), so the current `main` build survives even though it
+          # also carries a sha-* tag.
+          delete-tags: 'sha-*'
+          keep-n-tagged: 5
+          exclude-tags: 'main,buildcache'
+          delete-untagged: true
+          delete-partial-images: true
+          delete-orphaned-images: true
+          validate: true
+          dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}

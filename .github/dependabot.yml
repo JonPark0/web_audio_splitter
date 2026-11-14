@@ -1,0 +1,13 @@
+# Keeps the workflows' commit-pinned actions current: Dependabot raises the SHA
+# and the `# vX.Y.Z` comment next to it together.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Asia/Seoul
+    groups:
+      actions:
+        patterns: ['*']

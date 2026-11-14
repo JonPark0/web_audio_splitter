@@ -37,6 +37,9 @@ Meta Demucs AI 모델을 사용하여 오디오 파일을 개별 트랙(보컬, 
 ### 2. 설정
 루트 디렉토리에 `.env` 파일을 생성(`cp .env.example .env`)하거나 편집하세요:
 ```env
+IMAGE_TAG=main
+FRONTEND_BIND=0.0.0.0
+BACKEND_BIND=127.0.0.1
 USE_GPU=false
 DEMUCS_SHIFTS=0
 AUDIOSR_DDIM_STEPS=50
@@ -52,26 +55,36 @@ POSTGRES_DB=splitter
 - `AUDIOSR_DDIM_STEPS` / `AUDIOSR_GUIDANCE_SCALE` / `AUDIOSR_MODEL_NAME`: UI에서 AudioSR 복원 모델을 선택했을 때만 적용됩니다. 아래 [복원 모델](#복원-모델) 참고.
 - `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB`: 함께 실행되는 PostgreSQL 18 서비스(`db`)의 접속 정보입니다. 포트를 따로 열지 않는 한 compose 네트워크 안에서만 접근할 수 있습니다. 스키마 마이그레이션은 백엔드가 시작될 때 자동으로 실행됩니다.
 
-> **첫 빌드 참고:** 백엔드 이미지가 이제 빌드 시점에 [JusperLee/Apollo](https://github.com/JusperLee/Apollo)를 클론하고 체크포인트를 미리 받아오므로, 첫 `docker compose ... up --build`는 시간이 더 걸리고 이미지 용량도 커집니다.
+- `FRONTEND_BIND` / `BACKEND_BIND`: 포트를 열 호스트 주소입니다. 프론트엔드(3000)는 기본값 `0.0.0.0`이라 LAN의 다른 기기에서 `http://<서버-LAN-IP>:3000`으로 접속할 수 있습니다. 백엔드(8000)는 UI가 프론트엔드의 `/api` 프록시를 거쳐 호출하므로 기본값 `127.0.0.1`입니다.
+- `IMAGE_TAG`: GPU 구성이 실행할 배포 빌드입니다 (`main` = 최신, `sha-<커밋>` = 특정 커밋, 롤백용).
 
 ### 3. 애플리케이션 실행
 프로젝트 폴더에서 터미널을 열고 환경에 맞는 compose 파일을 실행하세요:
 
-**CPU 전용 (기본):**
+**GPU (NVIDIA, 권장):**
+호스트에 [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) 설치가 필요합니다. 이미지는 GitHub Actions가 빌드해 GHCR에 올려 둡니다 (`ghcr.io/jonpark0/web_audio_splitter-backend`: GPU PyTorch와 Apollo·FlashSR·BS-Roformer 체크포인트 포함, `ghcr.io/jonpark0/web_audio_splitter-frontend`). 따라서 내 컴퓨터에서 빌드하지 않습니다:
+```bash
+docker compose -f docker-compose.gpu.yml pull
+docker compose -f docker-compose.gpu.yml up -d
+```
+업데이트도 같은 두 명령으로 합니다. 패키지가 private이면 `docker login ghcr.io`로 한 번 로그인하세요 (`read:packages` 권한의 personal access token). 체크아웃한 소스로 GPU 구성을 직접 빌드하려면(변경 사항 시험 등) 빌드 파일을 추가합니다:
+```bash
+docker compose -f docker-compose.gpu.yml -f docker-compose.gpu.build.yml up -d --build
+```
+
+**CPU 전용:**
+이미지를 로컬에서 빌드합니다 (CPU PyTorch, `USE_GPU=false` 유지):
 ```bash
 docker compose -f docker-compose.cpu.yml up --build
 ```
 
-**GPU (NVIDIA):**
-호스트에 [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) 설치가 필요합니다. `.env` 파일에서 `USE_GPU=true`로 설정하세요.
-```bash
-docker compose -f docker-compose.gpu.yml up --build
-```
+> **첫 빌드 참고:** 백엔드 이미지는 빌드 시점에 [JusperLee/Apollo](https://github.com/JusperLee/Apollo)를 클론하고 체크포인트를 미리 받아오므로, 로컬에서 처음 `up --build`할 때는 시간이 걸리고 이미지 용량도 큽니다.
+
+로컬 빌드에서 `FRONTEND_MODE=dev`로 두면 nginx 빌드 대신 실시간 반영되는 Vite 개발 서버가 실행됩니다.
 
 ### 4. UI 접속
-빌드가 완료되면:
-- **프론트엔드:** [http://localhost:3000](http://localhost:3000)
-- **백엔드 API:** [http://localhost:8000](http://localhost:8000)
+- **프론트엔드:** [http://localhost:3000](http://localhost:3000), LAN의 다른 기기에서는 `http://<서버-LAN-IP>:3000`
+- **백엔드 API:** [http://localhost:8000](http://localhost:8000) (이 컴퓨터에서만)
 
 ## 사용 방법
 1. **분리:** **Split** 화면에서 오디오 파일을 끌어다 놓거나 YouTube URL을 붙여넣고, 모델(최고 품질은 BS-Roformer, 속도는 htdemucs)과 필요하면 **Restore**를 고르세요. 작업은 오른쪽 목록에 실시간 진행률과 함께 쌓이고, 열어서 따라갈 수 있습니다.
@@ -170,9 +183,11 @@ web_audio_splitter/
 │   ├── tailwind.config.js   # 디자인 토큰 (색상, 그림자, 애니메이션)
 │   ├── package.json         # Node.js 의존성
 │   ├── vite.config.js       # Vite 설정
-│   └── Dockerfile           # 프론트엔드 컨테이너 설정
+│   ├── nginx.conf           # 배포용 프론트엔드: 빌드 결과 서비스, /api를 백엔드로 프록시
+│   └── Dockerfile           # 프론트엔드 컨테이너 설정 (dev: Vite, prod: nginx)
 ├── docker-compose.cpu.yml   # CPU 환경용 Docker Compose
-├── docker-compose.gpu.yml   # GPU 환경용 Docker Compose (NVIDIA)
+├── docker-compose.gpu.yml   # GPU 환경용 Docker Compose (NVIDIA), GHCR 배포 이미지 실행
+├── docker-compose.gpu.build.yml # GPU 구성에 로컬 빌드를 추가 (pull 대신)
 ├── .env.example             # 환경 변수 템플릿
 └── README.md                # 영문 README
 ```
@@ -188,8 +203,7 @@ web_audio_splitter/
 ### GPU 가속
 GPU 가속을 활성화하려면:
 1. [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) 설치
-2. [.env](.env) 파일에서 `USE_GPU=true`로 설정
-3. GPU compose 파일로 실행: `docker compose -f docker-compose.gpu.yml up --build`
+2. GPU compose 파일로 실행: `docker compose -f docker-compose.gpu.yml pull && docker compose -f docker-compose.gpu.yml up -d` (항상 GPU 이미지를 실행합니다. `.env`의 `USE_GPU`는 CPU 파일에만 적용됩니다)
 
 ### 지원 오디오 포맷
 - ffmpeg가 읽을 수 있는 모든 포맷: MP3, WAV, FLAC, OGG, M4A, AIFF, WMA… 그리고 영상 파일(오디오 트랙 사용)
@@ -205,8 +219,12 @@ GPU 가속을 활성화하려면:
 
 **문제: "Port 3000 or 8000 already in use"**
 - 해결방법: 해당 포트를 사용 중인 다른 애플리케이션을 중지하거나 docker-compose 파일에서 포트를 수정하세요
-- 프론트엔드: `"3000:3000"`을 `"3001:3000"`으로 변경
-- 백엔드: `"8000:8000"`을 `"8001:8000"`으로 변경
+- 프론트엔드: `:3000:3000"`을 `:3001:3000"`으로 변경
+- 백엔드: `:8000:8000"`을 `:8001:8000"`으로 변경
+
+**문제: LAN의 다른 기기에서 UI가 열리지 않음**
+- `FRONTEND_BIND`가 `0.0.0.0`(기본값)인지, 호스트 방화벽이 TCP 3000을 허용하는지 확인하세요.
+- 필요한 포트는 3000뿐입니다. UI는 프론트엔드의 `/api` 프록시로 API를 호출하므로 백엔드는 `127.0.0.1`에 둬도 됩니다.
 
 **문제: "Out of memory during processing"**
 - 해결방법: 다른 애플리케이션을 종료하거나 더 짧은 오디오 파일을 사용하세요
@@ -229,7 +247,7 @@ GPU 가속을 활성화하려면:
 
 **문제: 복원 단계가 몇 분간 멈춰 있다가 Hugging Face 401/429 또는 "cannot find the requested files in the local cache" 오류로 실패함**
 - 원인: `/root/.cache`에 마운트되는 `demucs_cache` Docker 볼륨(Apollo/AudioSR/FlashSR/BS-Roformer의 다운로드된 체크포인트 저장)은 **named volume**입니다 — Docker는 볼륨이 처음 생성될 때만 이미지 내용으로 초기화합니다. 새 모델이 이미지에 추가되기 전에 이 볼륨이 이미 존재했다면(예: 한 번 빌드한 뒤 새 모델이 추가된 최신 버전을 받은 경우), 컨테이너는 새 이미지에 미리 준비된 캐시 대신 기존의 불완전한 볼륨을 계속 사용하게 되어, 느리거나 rate-limit에 걸리는 런타임 다운로드로 넘어가게 됩니다.
-- 해결방법: `docker compose rm -sf backend && docker volume rm web_audio_splitter_demucs_cache`(프로젝트 폴더 접두사가 다르면 볼륨 이름을 맞게 조정) 실행 후 `docker compose up -d backend`로 현재 이미지 기준으로 새로 채워지도록 하세요.
+- 해결방법: `docker compose -f docker-compose.gpu.yml rm -sf backend && docker volume rm web_audio_splitter_demucs_cache`(프로젝트 폴더 접두사가 다르면 볼륨 이름을 맞게 조정) 실행 후 `docker compose -f docker-compose.gpu.yml up -d backend`로 현재 이미지 기준으로 새로 채워지도록 하세요.
 
 **문제: 데이터베이스 초기화**
 - 작업 기록과 샘플 메타데이터는 `pgdata` Docker 볼륨에 저장됩니다(샘플 오디오 파일은 `backend/media/samples/`에 있습니다).
@@ -268,7 +286,11 @@ npm run dev
 ### 환경 변수
 | 변수 | 기본값 | 설명 |
 |----------|---------|-------------|
-| `USE_GPU` | `false` | NVIDIA GPU 가속 활성화 (복원 단계의 디바이스도 함께 결정) |
+| `USE_GPU` | `false` | NVIDIA GPU 가속 활성화 (복원 단계의 디바이스도 함께 결정). `docker-compose.cpu.yml`에만 적용, `docker-compose.gpu.yml`은 항상 `true` |
+| `IMAGE_TAG` | `main` | `docker-compose.gpu.yml`이 실행할 배포 빌드 (`sha-<커밋>`으로 특정 커밋 지정) |
+| `FRONTEND_BIND` | `0.0.0.0` | 프론트엔드 포트 3000의 호스트 주소 (`0.0.0.0` = LAN에서 접속 가능) |
+| `BACKEND_BIND` | `127.0.0.1` | 백엔드 포트 8000의 호스트 주소 (UI는 프론트엔드의 `/api` 프록시를 거침) |
+| `FRONTEND_MODE` | `prod` | 로컬 빌드 시 프론트엔드 단계: `prod` = nginx + 정적 빌드, `dev` = Vite 개발 서버 |
 | `DEMUCS_SHIFTS` | `0` | 분리 품질을 위한 랜덤 시프트 횟수 |
 | `AUDIOSR_DDIM_STEPS` | `50` | AudioSR 샘플링 스텝 수 (높을수록 느리지만 대체로 품질이 좋음) |
 | `AUDIOSR_GUIDANCE_SCALE` | `3.5` | AudioSR guidance scale |
