@@ -37,6 +37,9 @@ A web application to separate audio files into individual tracks (Vocals, Drums,
 ### 2. Configuration
 Create(`cp .env.example .env`) or edit the `.env` file in the root directory:
 ```env
+IMAGE_TAG=main
+FRONTEND_BIND=0.0.0.0
+BACKEND_BIND=127.0.0.1
 USE_GPU=false
 DEMUCS_SHIFTS=0
 AUDIOSR_DDIM_STEPS=50
@@ -52,26 +55,36 @@ POSTGRES_DB=splitter
 - `AUDIOSR_DDIM_STEPS` / `AUDIOSR_GUIDANCE_SCALE` / `AUDIOSR_MODEL_NAME`: Only apply when the AudioSR recovery model is selected in the UI; see [Recovery Models](#recovery-models) below.
 - `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB`: Credentials for the bundled PostgreSQL 18 service (`db`). It is only reachable inside the compose network unless you publish its port. Schema migrations run automatically when the backend starts.
 
-> **First build note:** the backend image now clones [JusperLee/Apollo](https://github.com/JusperLee/Apollo) and prefetches its checkpoint at build time, so `docker compose ... up --build` will take noticeably longer and produce a larger image the first time.
+- `FRONTEND_BIND` / `BACKEND_BIND`: Host addresses the ports listen on. The frontend (3000) defaults to `0.0.0.0`, so other devices on the LAN can open `http://<server-LAN-IP>:3000`; the backend (8000) defaults to `127.0.0.1`, since the UI reaches it through the frontend's `/api` proxy.
+- `IMAGE_TAG`: Which published build the GPU setup runs (`main` = newest; `sha-<commit>` = a specific commit, e.g. to roll back).
 
 ### 3. Run the Application
 Open your terminal in the project folder and run the appropriate compose file for your environment:
 
-**CPU only (default):**
+**GPU (NVIDIA, recommended):**
+Requires [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) installed on your host. The images are built by GitHub Actions and published to GHCR (`ghcr.io/jonpark0/web_audio_splitter-backend` with GPU PyTorch and the Apollo, FlashSR and BS-Roformer checkpoints baked in, and `ghcr.io/jonpark0/web_audio_splitter-frontend`), so nothing is built on your machine:
+```bash
+docker compose -f docker-compose.gpu.yml pull
+docker compose -f docker-compose.gpu.yml up -d
+```
+Update later with the same two commands. If the packages are private, log in once with `docker login ghcr.io` (a personal access token with `read:packages`). To build the GPU stack from your checkout instead (e.g. to try a change), add the build file:
+```bash
+docker compose -f docker-compose.gpu.yml -f docker-compose.gpu.build.yml up -d --build
+```
+
+**CPU only:**
+Builds the images locally (CPU PyTorch; keep `USE_GPU=false`):
 ```bash
 docker compose -f docker-compose.cpu.yml up --build
 ```
 
-**GPU (NVIDIA):**
-Requires [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) installed on your host. Set `USE_GPU=true` in your `.env` file.
-```bash
-docker compose -f docker-compose.gpu.yml up --build
-```
+> **First build note:** the backend image clones [JusperLee/Apollo](https://github.com/JusperLee/Apollo) and prefetches its checkpoints at build time, so a local `up --build` takes a while and produces a large image the first time.
+
+`FRONTEND_MODE=dev` (when building locally) runs the Vite dev server with live reload instead of the nginx build.
 
 ### 4. Access the UI
-Once the build is complete:
-- **Frontend:** [http://localhost:3000](http://localhost:3000)
-- **Backend API:** [http://localhost:8000](http://localhost:8000)
+- **Frontend:** [http://localhost:3000](http://localhost:3000), or `http://<server-LAN-IP>:3000` from another device on the LAN
+- **Backend API:** [http://localhost:8000](http://localhost:8000) (this machine only)
 
 ## How to Use
 1. **Split:** On the **Split** page, drop audio files (or paste a YouTube URL), pick a model (BS-Roformer for the best quality, htdemucs for speed) and optionally **Restore**. Jobs queue on the right with live progress; open one to follow it.
@@ -170,9 +183,11 @@ web_audio_splitter/
 │   ├── tailwind.config.js   # Design tokens (colors, shadows, animation)
 │   ├── package.json         # Node.js dependencies
 │   ├── vite.config.js       # Vite configuration
-│   └── Dockerfile           # Frontend container configuration
+│   ├── nginx.conf           # Production frontend: serves the build, proxies /api to the backend
+│   └── Dockerfile           # Frontend container configuration (dev: Vite, prod: nginx)
 ├── docker-compose.cpu.yml   # Docker Compose for CPU environment
-├── docker-compose.gpu.yml   # Docker Compose for GPU environment (NVIDIA)
+├── docker-compose.gpu.yml   # Docker Compose for GPU environment (NVIDIA), runs the published GHCR images
+├── docker-compose.gpu.build.yml # Adds local builds to the GPU setup (instead of pulling)
 ├── .env.example             # Environment variables template
 └── README.md                # This file
 ```
@@ -188,8 +203,7 @@ The `DEMUCS_SHIFTS` parameter controls the number of random shifts used during s
 ### GPU Acceleration
 To enable GPU acceleration:
 1. Install [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
-2. Set `USE_GPU=true` in [.env](.env)
-3. Run with the GPU compose file: `docker compose -f docker-compose.gpu.yml up --build`
+2. Run with the GPU compose file: `docker compose -f docker-compose.gpu.yml pull && docker compose -f docker-compose.gpu.yml up -d` (it always runs the GPU image; `USE_GPU` in `.env` only affects the CPU file)
 
 ### Supported Audio Formats
 - Anything ffmpeg reads: MP3, WAV, FLAC, OGG, M4A, AIFF, WMA… and video files (the audio track is used)
@@ -205,8 +219,12 @@ To enable GPU acceleration:
 
 **Issue: "Port 3000 or 8000 already in use"**
 - Solution: Stop other applications using these ports or modify ports in your docker-compose file
-- Change `"3000:3000"` to `"3001:3000"` for frontend
-- Change `"8000:8000"` to `"8001:8000"` for backend
+- Change `:3000:3000"` to `:3001:3000"` for frontend
+- Change `:8000:8000"` to `:8001:8000"` for backend
+
+**Issue: the UI doesn't open from another device on the LAN**
+- Check that `FRONTEND_BIND` is `0.0.0.0` (the default) and that the host firewall allows TCP 3000.
+- Only port 3000 is needed: the UI calls the API through the frontend's `/api` proxy, so the backend can stay on `127.0.0.1`.
 
 **Issue: "Out of memory during processing"**
 - Solution: Close other applications or use a shorter audio file
@@ -228,8 +246,8 @@ To enable GPU acceleration:
 - If FlashSR's files still won't come through, build with `PREFETCH_FLASHSR=false` in `.env` (or `--build-arg PREFETCH_FLASHSR=false`): FlashSR is opt-in and downloads them on its first use instead.
 
 **Issue: recovery hangs for minutes then fails with a Hugging Face 401/429/"cannot find the requested files in the local cache" error**
-- Cause: the `demucs_cache` Docker volume (mounted at `/root/.cache`, holding Apollo/AudioSR/FlashSR/BS-Roformer's downloaded checkpoints) is a **named volume** — Docker only seeds it from the image once, the first time it's created. If that volume already existed from before a model was added to the image (e.g. you built once, then pulled a newer version of this project with a new model), the container keeps using the old, incomplete volume instead of the new image's baked-in cache, and falls back to a slow/rate-limited runtime download instead of using the pre-warmed one.
-- Solution: `docker compose rm -sf backend && docker volume rm web_audio_splitter_demucs_cache` (adjust the volume name to your project folder's prefix if different), then `docker compose up -d backend` to let it reseed fresh from the current image.
+- Cause: the `demucs_cache` Docker volume (mounted at `/root/.cache`, holding Apollo/AudioSR/FlashSR/BS-Roformer's downloaded checkpoints) is a **named volume** — Docker only seeds it from the image once, the first time it's created. If that volume already existed from before a model was added to the image (e.g. you built or pulled once, then updated to an image with a new model), the container keeps using the old, incomplete volume instead of the new image's baked-in cache, and falls back to a slow/rate-limited runtime download instead of using the pre-warmed one.
+- Solution: `docker compose -f docker-compose.gpu.yml rm -sf backend && docker volume rm web_audio_splitter_demucs_cache` (adjust the volume name to your project folder's prefix if different), then `docker compose -f docker-compose.gpu.yml up -d backend` to let it reseed fresh from the current image.
 
 **Issue: resetting the database**
 - Jobs and the sample library's metadata live in the `pgdata` Docker volume (sample audio itself is under `backend/media/samples/`).
@@ -268,7 +286,11 @@ npm run dev
 ### Environment Variables
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `USE_GPU` | `false` | Enable NVIDIA GPU acceleration (also selects the recovery stage's device) |
+| `USE_GPU` | `false` | Enable NVIDIA GPU acceleration (also selects the recovery stage's device). `docker-compose.cpu.yml` only; `docker-compose.gpu.yml` always sets `true` |
+| `IMAGE_TAG` | `main` | Published build `docker-compose.gpu.yml` runs (`sha-<commit>` for a specific commit) |
+| `FRONTEND_BIND` | `0.0.0.0` | Host address of the frontend port 3000 (`0.0.0.0` = reachable from the LAN) |
+| `BACKEND_BIND` | `127.0.0.1` | Host address of the backend port 8000 (the UI goes through the frontend's `/api` proxy) |
+| `FRONTEND_MODE` | `prod` | Frontend stage for local builds: `prod` = nginx + static build, `dev` = Vite dev server |
 | `DEMUCS_SHIFTS` | `0` | Number of random shifts for separation quality |
 | `AUDIOSR_DDIM_STEPS` | `50` | AudioSR sampling steps (higher = slower, generally better) |
 | `AUDIOSR_GUIDANCE_SCALE` | `3.5` | AudioSR guidance scale |

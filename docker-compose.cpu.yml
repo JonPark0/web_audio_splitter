@@ -28,7 +28,9 @@ services:
         USE_GPU: ${USE_GPU:-false}
         PREFETCH_FLASHSR: ${PREFETCH_FLASHSR:-true}
     ports:
-      - "8000:8000"
+      # The UI reaches the API through the frontend's /api proxy, so the backend
+      # only listens on this machine. BACKEND_BIND=0.0.0.0 opens it to the LAN.
+      - "${BACKEND_BIND:-127.0.0.1}:8000:8000"
     volumes:
       - ./backend/media:/app/media
       - demucs_cache:/root/.cache
@@ -48,10 +50,16 @@ services:
         condition: service_healthy
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      # prod = static build served by nginx (the default, as in the published
+      # image); dev = Vite dev server with the source mounted below
+      target: ${FRONTEND_MODE:-prod}
     ports:
-      - "3000:3000"
-    volumes:
+      # Open to the LAN: http://<server-LAN-IP>:3000. FRONTEND_BIND=127.0.0.1
+      # keeps it to this machine.
+      - "${FRONTEND_BIND:-0.0.0.0}:3000:3000"
+    volumes:  # used by the dev server only; the prod (nginx) image ignores /app
       - ./frontend:/app
       - /app/node_modules
     environment:
